@@ -8,12 +8,15 @@ import {
   ScrollView,
   ActivityIndicator,
   SafeAreaView,
+  TextInput,
+  Alert,
+  Platform,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import axios from "axios";
 
-// ==== CONFIG WARNA ====
+// ============ CONFIG WARNA ============
 const C = {
   brand: "#42909b",
   bg: "#ffffff",
@@ -21,11 +24,12 @@ const C = {
   sub: "#475569",
   border: "#e5e7eb",
   soft: "#f8fafc",
+  pill: "#f3f4f6",       // ✅ ditambahkan agar tidak error
   holiday: "#dc2626",
   sunday: "#dc2626",
 };
 
-// ==== UTIL ====
+// ============ UTIL ============
 const WEEK_DAYS = ["Ahad", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"];
 const CELL = 7;
 
@@ -33,7 +37,11 @@ function addMonths(d: Date, delta: number) {
   return new Date(d.getFullYear(), d.getMonth() + delta, 1);
 }
 function titleId(d: Date) {
-  return d.toLocaleDateString("id-ID", { month: "long", year: "numeric", timeZone: "Asia/Jakarta" });
+  return d.toLocaleDateString("id-ID", {
+    month: "long",
+    year: "numeric",
+    timeZone: "Asia/Jakarta",
+  });
 }
 function ymdLocal(d: Date) {
   const y = d.getFullYear();
@@ -42,40 +50,59 @@ function ymdLocal(d: Date) {
   return `${y}-${m < 10 ? "0" + m : m}-${day < 10 ? "0" + day : day}`;
 }
 
-// ==== API CONFIG ====
-// Pilih host sesuai platform (emulator Android vs web/iOS)
-import { Platform } from "react-native";
-
+// ============ API CONFIG ============
 const API_BASE =
   Platform.OS === "android"
-    ? "http://10.0.2.2:8000/api"
-    : "http://localhost:8000/api";
+    ? "http://10.0.2.2:8000/api" // emulator Android
+    : "http://localhost:8000/api"; // web/iOS simulator
 
-// Endpoint index kalender-akademik (tanpa /kalender di belakang)
 const KALENDER_URL = `${API_BASE}/kalender-akademik`;
 
+// Bentuk data yang dipakai UI
+type CalEvent = { id?: number; date: string; title: string };
+
+// ADMIN toggle (sementara hardcode; nanti ganti sesuai role login)
+const IS_ADMIN = true;
+
+// Loader bulan tertentu
 async function fetchMonthEvents(year: number, monthIndex0: number) {
   const month1 = monthIndex0 + 1;
-  // kalau backendmu support filter query, keep ini; kalau tidak, query akan diabaikan tapi tetap 200
   const url = `${KALENDER_URL}?year=${year}&month=${month1}`;
 
   try {
-    console.log("GET", url);
     const { data } = await axios.get(url, { timeout: 15000 });
-    // sesuaikan shape responsemu; sementara aman-kan default ke array kosong
-    return (data?.data ?? data ?? []);
+    // Normalisasi bentuk data agar fleksibel
+    const list = (data?.data ?? data ?? []) as any[];
+    return list.map((it) => ({
+      id: it.id ?? it.ID ?? it.event_id,
+      date: it.date ?? it.tanggal ?? it.tgl,
+      title: it.title ?? it.nama ?? it.kegiatan,
+    })) as CalEvent[];
   } catch (err: any) {
-    console.log("ERR URL:", url);
-    console.log("ERR STATUS:", err?.response?.status);
-    console.log("ERR DATA:", err?.response?.data);
-    throw new Error(
-      `Gagal memuat kalender (${err?.response?.status ?? "?"})`
-    );
+    const status = err?.response?.status;
+    const payload = err?.response?.data;
+    const msg = status
+      ? `HTTP ${status} – ${typeof payload === "string" ? payload : JSON.stringify(payload)}`
+      : err?.message ?? "Network error";
+    throw new Error(`Gagal memuat kalender (${msg})`);
   }
 }
 
-// ==== HOOK GRID ====
-function useCalendar(cursor: Date, holidays: { date: string; title: string }[]) {
+// CRUD helpers
+async function createEvent(ev: CalEvent) {
+  const { data } = await axios.post(KALENDER_URL, ev, { timeout: 15000 });
+  return data?.data ?? data;
+}
+async function updateEvent(id: number, ev: CalEvent) {
+  const { data } = await axios.put(`${KALENDER_URL}/${id}`, ev, { timeout: 15000 });
+  return data?.data ?? data;
+}
+async function deleteEvent(id: number) {
+  await axios.delete(`${KALENDER_URL}/${id}`, { timeout: 15000 });
+}
+
+// ============ HOOK GRID ============
+function useCalendar(cursor: Date, holidays: CalEvent[]) {
   return useMemo(() => {
     const year = cursor.getFullYear();
     const month = cursor.getMonth();
@@ -107,45 +134,151 @@ function useCalendar(cursor: Date, holidays: { date: string; title: string }[]) 
   }, [cursor, holidays]);
 }
 
-// ==== MAIN ====
+// ============ FORM KECIL (Tambah/Edit) ============
+function EventForm({
+  value,
+  onCancel,
+  onSubmit,
+  busy,
+}: {
+  value: CalEvent;
+  onCancel: () => void;
+  onSubmit: (v: CalEvent) => void;
+  busy: boolean;
+}) {
+  const [local, setLocal] = useState<CalEvent>(value);
+
+  useEffect(() => setLocal(value), [value]);
+
+  return (
+    <View style={s.formBox}>
+      <Text style={s.formTitle}>{value?.id ? "Edit Kegiatan" : "Tambah Kegiatan"}</Text>
+
+      <Text style={s.label}>Tanggal (YYYY-MM-DD)</Text>
+      <TextInput
+        placeholder="2025-10-01"
+        placeholderTextColor={C.sub}
+        value={local.date}
+        onChangeText={(t) => setLocal((p) => ({ ...p, date: t }))}
+        style={s.input}
+      />
+
+      <Text style={[s.label, { marginTop: 10 }]}>Judul</Text>
+      <TextInput
+        placeholder="Ujian Tengah Semester"
+        placeholderTextColor={C.sub}
+        value={local.title}
+        onChangeText={(t) => setLocal((p) => ({ ...p, title: t }))}
+        style={s.input}
+      />
+
+      <View style={{ flexDirection: "row", gap: 8, marginTop: 12 }}>
+        <TouchableOpacity
+          onPress={onCancel}
+          disabled={busy}
+          style={[s.btn, { backgroundColor: C.soft, borderColor: C.border }]}
+        >
+          <Text>Batalkan</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          onPress={() => onSubmit(local)}
+          disabled={busy}
+          style={[s.btn, { backgroundColor: C.brand }]}
+        >
+          <Text style={{ color: "#fff", fontWeight: "700" }}>
+            {busy ? "Menyimpan..." : "Simpan"}
+          </Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+}
+
+// ============ MAIN ============
 export default function KalenderPendidikan() {
   const today = new Date();
   const [cursor, setCursor] = useState(new Date(today.getFullYear(), today.getMonth(), 1));
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [remoteHolidays, setRemoteHolidays] = useState<{ date: string; title: string }[] | null>(null);
+  const [remoteHolidays, setRemoteHolidays] = useState<CalEvent[] | null>(null);
 
+  // State Admin
+  const [editing, setEditing] = useState<CalEvent | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  // Fetch setiap ganti bulan
   useEffect(() => {
     let cancelled = false;
-    async function run() {
+    (async () => {
       try {
         setLoading(true);
         setError(null);
         const y = cursor.getFullYear();
         const m0 = cursor.getMonth();
         const data = await fetchMonthEvents(y, m0);
-        if (!cancelled) setRemoteHolidays(data?.length ? data : null);
+        if (!cancelled) setRemoteHolidays(data?.length ? data : []);
       } catch (e: any) {
         if (!cancelled) {
-          setRemoteHolidays(null);
+          setRemoteHolidays([]);
           setError(e?.message ?? "Gagal memuat kalender.");
         }
       } finally {
         !cancelled && setLoading(false);
       }
-    }
-    run();
-    return () => { cancelled = true; };
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [cursor]);
 
   const monthHolidays = remoteHolidays ?? [];
   const { cells, title } = useCalendar(cursor, monthHolidays);
 
+  // Submit tambah/edit
+  async function submitEvent(val: CalEvent) {
+    try {
+      setSubmitting(true);
+      if (val.id) await updateEvent(val.id, val);
+      else await createEvent(val);
+      // reload bulan sekarang
+      setCursor((d) => new Date(d));
+      setEditing(null);
+    } catch (e: any) {
+      Alert.alert("Gagal", e?.message ?? "Tidak bisa menyimpan.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  // Hapus
+  async function removeEvent(id?: number, title?: string) {
+    if (!id) return Alert.alert("Tidak bisa hapus", "Item ini tidak memiliki id.");
+    Alert.alert("Hapus", `Hapus "${title ?? "item"}"?`, [
+      { text: "Batal" },
+      {
+        text: "Hapus",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            await deleteEvent(id);
+            setCursor((d) => new Date(d)); // reload
+          } catch (e: any) {
+            Alert.alert("Gagal", e?.message ?? "Tidak bisa menghapus.");
+          }
+        },
+      },
+    ]);
+  }
+
   return (
     <SafeAreaView style={s.container}>
-      {/* HEADER SERAGAM */}
+      {/* HEADER */}
       <View style={s.header}>
-        <TouchableOpacity onPress={() => router.back()} activeOpacity={0.85} style={s.backBtn}>
+        <TouchableOpacity
+          onPress={() => router.back()}
+          activeOpacity={0.85}
+          style={s.backBtn}
+        >
           <Ionicons name="chevron-back" size={22} color="#000" />
         </TouchableOpacity>
         <Text style={s.headerTitle}>Kalender Pendidikan</Text>
@@ -169,7 +302,9 @@ export default function KalenderPendidikan() {
           <View style={s.weekHeaderRow}>
             {WEEK_DAYS.map((d) => (
               <View key={d} style={s.weekHeaderCell}>
-                <Text style={[s.weekHeaderText, d === "Ahad" && { color: C.sunday }]}>{d}</Text>
+                <Text style={[s.weekHeaderText, d === "Ahad" && { color: C.sunday }]}>
+                  {d}
+                </Text>
               </View>
             ))}
           </View>
@@ -206,18 +341,34 @@ export default function KalenderPendidikan() {
           </View>
         )}
         {error && (
-          <View style={{ padding: 8, borderRadius: 8, borderColor: "#fecaca", borderWidth: 1, backgroundColor: "#fff1f2" }}>
-            <Text style={{ color: "#b91c1c", marginBottom: 8 }}>Gagal memuat kalender: {error}</Text>
+          <View
+            style={{
+              padding: 8,
+              borderRadius: 8,
+              borderColor: "#fecaca",
+              borderWidth: 1,
+              backgroundColor: "#fff1f2",
+            }}
+          >
+            <Text style={{ color: "#b91c1c", marginBottom: 8 }}>
+              Gagal memuat kalender: {error}
+            </Text>
             <TouchableOpacity
               onPress={() => setCursor((d) => new Date(d))}
-              style={{ alignSelf: "flex-start", paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, backgroundColor: "#ef4444" }}
+              style={{
+                alignSelf: "flex-start",
+                paddingHorizontal: 12,
+                paddingVertical: 6,
+                borderRadius: 8,
+                backgroundColor: "#ef4444",
+              }}
             >
               <Text style={{ color: "#fff", fontWeight: "700" }}>Coba lagi</Text>
             </TouchableOpacity>
           </View>
         )}
 
-        {/* Daftar Libur */}
+        {/* Daftar Libur & Kegiatan */}
         <View style={s.section}>
           <Text style={s.sectionTitle}>Hari Libur & Kegiatan</Text>
           {monthHolidays.length === 0 ? (
@@ -229,20 +380,72 @@ export default function KalenderPendidikan() {
               const bln = d.toLocaleDateString("id-ID", { month: "short" });
               const hari = d.toLocaleDateString("id-ID", { weekday: "long" });
               return (
-                <View key={h.date + h.title} style={s.holidayRow}>
+                <View key={(h.id ?? 0) + h.date + h.title} style={s.holidayRow}>
                   <View style={s.holidayDateBox}>
                     <Text style={s.holidayMon}>{bln}</Text>
                     <Text style={s.holidayDay}>{tgl}</Text>
                   </View>
                   <View style={{ flex: 1 }}>
                     <Text style={s.holidayTitle}>{h.title}</Text>
-                    <Text style={s.holidaySub}>{hari}, {tgl} {bln} {d.getFullYear()}</Text>
+                    <Text style={s.holidaySub}>
+                      {hari}, {tgl} {bln} {d.getFullYear()}
+                    </Text>
                   </View>
+
+                  {/* Tombol Admin per item */}
+                  {IS_ADMIN && (
+                    <View style={{ flexDirection: "row", gap: 8 }}>
+                      <TouchableOpacity
+                        onPress={() => setEditing({ id: h.id, date: h.date, title: h.title })}
+                        style={s.itemBtn}
+                      >
+                        <Text>Edit</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        onPress={() => removeEvent(h.id, h.title)}
+                        style={[s.itemBtn, { backgroundColor: "#fee2e2" }]}
+                      >
+                        <Text style={{ color: "#b91c1c", fontWeight: "700" }}>Hapus</Text>
+                      </TouchableOpacity>
+                    </View>
+                  )}
                 </View>
               );
             })
           )}
         </View>
+
+        {/* Panel Admin (Tambah / Form) */}
+        {IS_ADMIN && (
+          <View style={[s.section, { marginTop: 12 }]}>
+            <Text style={s.sectionTitle}>Admin: Kelola Kegiatan</Text>
+
+            {!editing && (
+              <TouchableOpacity
+                onPress={() => setEditing({ date: ymdLocal(today), title: "" })}
+                style={{
+                  alignSelf: "flex-start",
+                  margin: 12,
+                  paddingVertical: 10,
+                  paddingHorizontal: 14,
+                  borderRadius: 8,
+                  backgroundColor: C.brand,
+                }}
+              >
+                <Text style={{ color: "#fff", fontWeight: "700" }}>Tambah</Text>
+              </TouchableOpacity>
+            )}
+
+            {editing && (
+              <EventForm
+                value={editing}
+                busy={submitting}
+                onCancel={() => setEditing(null)}
+                onSubmit={submitEvent}
+              />
+            )}
+          </View>
+        )}
 
         <View style={{ height: 40 }} />
       </ScrollView>
@@ -250,11 +453,10 @@ export default function KalenderPendidikan() {
   );
 }
 
-// ==== STYLES ====
+// ============ STYLES ============
 const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: C.bg },
 
-  // Header seragam
   header: {
     backgroundColor: C.brand,
     paddingHorizontal: 12,
@@ -299,7 +501,12 @@ const s = StyleSheet.create({
   },
   monthTitle: { fontSize: 16, fontWeight: "700", color: C.text },
 
-  weekHeaderRow: { flexDirection: "row", backgroundColor: C.soft, borderBottomWidth: 1, borderBottomColor: C.border },
+  weekHeaderRow: {
+    flexDirection: "row",
+    backgroundColor: C.soft,
+    borderBottomWidth: 1,
+    borderBottomColor: C.border,
+  },
   weekHeaderCell: { width: `${100 / CELL}%`, alignItems: "center", paddingVertical: 8 },
   weekHeaderText: { fontSize: 12, fontWeight: "700", color: C.sub },
 
@@ -316,7 +523,13 @@ const s = StyleSheet.create({
   dayText: { fontSize: 12, color: C.text },
   holidayDot: { marginTop: 2, fontSize: 10, color: C.holiday },
 
-  section: { marginTop: 12, backgroundColor: C.bg, borderRadius: 12, borderWidth: 1, borderColor: C.border },
+  section: {
+    marginTop: 12,
+    backgroundColor: C.bg,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: C.border,
+  },
   sectionTitle: {
     paddingHorizontal: 12,
     paddingVertical: 10,
@@ -328,10 +541,45 @@ const s = StyleSheet.create({
   },
   emptyText: { padding: 12, color: C.sub },
 
-  holidayRow: { flexDirection: "row", alignItems: "center", paddingHorizontal: 12, paddingVertical: 10, gap: 12 },
+  holidayRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 12,
+  },
   holidayDateBox: { width: 54, alignItems: "flex-start", paddingRight: 6 },
   holidayMon: { color: C.sub, fontWeight: "700" },
   holidayDay: { color: C.text, fontWeight: "800", fontSize: 18, marginTop: -2 },
   holidayTitle: { color: C.text, fontWeight: "700" },
   holidaySub: { color: C.sub, fontSize: 12, marginTop: 2 },
+
+  // Admin
+  formBox: {
+    marginHorizontal: 12,
+    marginBottom: 12,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 12,
+    backgroundColor: "#fff",
+  },
+  formTitle: { fontWeight: "700", marginBottom: 8, color: C.text },
+  label: { color: C.sub, marginBottom: 4, fontSize: 12 },
+  input: {
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    color: C.text,
+    backgroundColor: "#fff",
+  },
+  btn: { paddingVertical: 12, paddingHorizontal: 16, borderRadius: 8 },
+  itemBtn: {
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    backgroundColor: C.pill,
+  },
 });

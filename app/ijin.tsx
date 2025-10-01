@@ -10,9 +10,11 @@ import {
   Alert,
   Platform,
   StatusBar,
+  ToastAndroid,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
+import * as Notifications from "expo-notifications";
 
 const C = {
   bg: "#ffffff",
@@ -38,12 +40,41 @@ function toISODate(d: Date) {
   return `${y}-${m}-${day}`;
 }
 
+// --- ganti blok setNotificationHandler lama ---
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    // tampilkan banner saat app foreground
+    shouldShowBanner: true,
+    shouldShowList: true,
+    shouldPlaySound: false,
+    shouldSetBadge: false,
+  }),
+});
+
 export default function IjinScreen() {
   const [nama, setNama] = useState("");
   const [unit, setUnit] = useState("");
   const [tanggal, setTanggal] = useState("");
   const [keterangan, setKeterangan] = useState("");
   const [loading, setLoading] = useState(false);
+
+  // Minta izin notifikasi + channel Android
+  useEffect(() => {
+    (async () => {
+      // ijin
+      const { status } = await Notifications.getPermissionsAsync();
+      if (status !== "granted") {
+        await Notifications.requestPermissionsAsync();
+      }
+      // channel untuk Android
+      if (Platform.OS === "android") {
+        await Notifications.setNotificationChannelAsync("default", {
+          name: "default",
+          importance: Notifications.AndroidImportance.MAX,
+        });
+      }
+    })();
+  }, []);
 
   // Auto-isi tanggal hari ini (ISO)
   useEffect(() => {
@@ -54,6 +85,27 @@ export default function IjinScreen() {
     () => unit.trim() !== "" && !Number.isNaN(Number(unit)),
     [unit]
   );
+
+  const fireSuccessNotification = async (payload: {
+    nama: string;
+    tanggal: string;
+  }) => {
+    // Notifikasi sistem (Expo)
+    try {
+      await Notifications.scheduleNotificationAsync({
+        content: {
+          title: "Izin terkirim ✅",
+          body: `${payload.nama} • ${payload.tanggal}`,
+        },
+        trigger: null, // segera tampil
+      });
+    } catch {
+      // Fallback toast Android kalau module/izin gagal
+      if (Platform.OS === "android") {
+        ToastAndroid.show("Izin terkirim", ToastAndroid.SHORT);
+      }
+    }
+  };
 
   const handleSubmit = async () => {
     if (!nama || !unit || !tanggal || !keterangan) {
@@ -93,7 +145,9 @@ export default function IjinScreen() {
           msg += j?.pesan ? ` – ${j.pesan}` : "";
           if (j?.errors) {
             const firstErr =
-              Object.values(j.errors).flat?.()[0] || JSON.stringify(j.errors);
+              (Array.isArray(Object.values(j.errors)) &&
+                (Object.values(j.errors) as any[]).flat?.()[0]) ||
+              JSON.stringify(j.errors);
             msg += firstErr ? `\n${firstErr}` : "";
           }
         } catch {
@@ -102,7 +156,17 @@ export default function IjinScreen() {
         throw new Error(msg);
       }
 
+      // Notifikasi & alert sukses
+      await fireSuccessNotification({ nama, tanggal });
       Alert.alert("Berhasil", "Pengajuan izin telah dikirim.");
+
+      // (opsional) reset form
+      setKeterangan("");
+      setUnit("");
+      setNama("");
+      setTanggal(toISODate(new Date()));
+
+      // Kembali ke layar sebelumnya
       router.back();
     } catch (e: any) {
       console.error(e);

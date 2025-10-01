@@ -22,8 +22,8 @@ const C = {
   sub: "#6b7280",
   pill: "#f3f4f6",
   border: "#e5e7eb",
-  brand: "#42909b",     // ⬅️ seragam
-  brandDim: "#a9d5db",  // ⬅️ versi redup untuk disabled
+  brand: "#42909b",
+  brandDim: "#a9d5db",
   danger: "#ef4444",
 } as const;
 
@@ -35,35 +35,58 @@ const API_URL =
 export default function LoginScreen() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  const imei = "1234567890"; // dummy jika backend memerlukan
+  // Backend kamu mewajibkan imei, jadi kita kasih input biar gampang uji:
+  // - admin: 000111222
+  // - user1: 1234567890
+  const [imei, setImei] = useState("1234567890");
+
   const [showPass, setShowPass] = useState(false);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  const valid = useMemo(() => username.trim() && password.trim(), [username, password]);
+  const valid = useMemo(
+    () => username.trim() !== "" && password.trim() !== "" && imei.trim() !== "",
+    [username, password, imei]
+  );
 
   const handleLogin = async () => {
-    if (!valid) return;
+    if (!valid || loading) return;
     setErr(null);
     setLoading(true);
     try {
       const res = await fetch(API_URL, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
         body: JSON.stringify({ username, password, imei }),
       });
 
       const text = await res.text();
-      let json: any = {};
-      try { json = JSON.parse(text); } catch {}
+      let json: any;
+      try {
+        json = JSON.parse(text);
+      } catch {
+        json = null;
+      }
 
       if (!res.ok) {
+        // Backend kirim 401 + { status:'error', message:'...' }
         const msg = json?.message || `Login gagal (HTTP ${res.status})`;
         throw new Error(msg);
       }
 
-      await AsyncStorage.setItem("auth.user", JSON.stringify(json.data ?? {}));
-      router.replace("/");
+      if (json?.status !== "success" || !json?.data) {
+        throw new Error(json?.message || "Login gagal.");
+      }
+
+      // Simpan profil (kamu bisa tambah token kalau nanti backend kasih)
+      await AsyncStorage.setItem("auth.user", JSON.stringify(json.data));
+      await AsyncStorage.setItem("auth.role", String(json.data.role ?? ""));
+
+      Alert.alert("Berhasil", "Login berhasil.");
+      router.replace("/"); // arahkan ke beranda/tab utama
     } catch (e: any) {
       const msg = e?.message ?? "Terjadi kesalahan saat login.";
       setErr(msg);
@@ -106,7 +129,7 @@ export default function LoginScreen() {
               <TextInput
                 value={username}
                 onChangeText={setUsername}
-                placeholder="Username"
+                placeholder="Username (admin / user1)"
                 placeholderTextColor={C.sub}
                 style={s.input}
                 autoCapitalize="none"
@@ -121,7 +144,7 @@ export default function LoginScreen() {
               <TextInput
                 value={password}
                 onChangeText={setPassword}
-                placeholder="Password"
+                placeholder="Password (admin123 / user123)"
                 placeholderTextColor={C.sub}
                 style={s.input}
                 secureTextEntry={!showPass}
@@ -133,10 +156,18 @@ export default function LoginScreen() {
               </TouchableOpacity>
             </View>
 
-            {/* Forgot password */}
-            <TouchableOpacity onPress={() => Alert.alert("Info", "Fitur lupa kata sandi akan tersedia.")}>
-              <Text style={s.forgot}>Forgot password?</Text>
-            </TouchableOpacity>
+            {/* IMEI */}
+            <View style={s.pill}>
+              <Ionicons name="phone-portrait-outline" size={18} color={C.sub} style={{ marginRight: 8 }} />
+              <TextInput
+                value={imei}
+                onChangeText={setImei}
+                placeholder="IMEI (000111222 / 1234567890)"
+                placeholderTextColor={C.sub}
+                style={s.input}
+                keyboardType="numeric"
+              />
+            </View>
 
             {/* Error */}
             {err ? <Text style={s.errText}>{err}</Text> : null}
@@ -148,6 +179,12 @@ export default function LoginScreen() {
               onPress={handleLogin}
             >
               {loading ? <ActivityIndicator color="#fff" /> : <Text style={s.loginText}>Login</Text>}
+            </TouchableOpacity>
+
+            {/* Lupa password (opsional) */}
+            <TouchableOpacity onPress={() => Alert.alert("Info", "Fitur lupa kata sandi akan tersedia.")}
+              style={{ marginTop: 12 }}>
+              <Text style={{ color: C.sub, textAlign: "center" }}>Forgot password?</Text>
             </TouchableOpacity>
           </View>
 
@@ -175,7 +212,7 @@ const s = StyleSheet.create({
     borderRadius: 12,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "rgba(255,255,255,0.85)", // putih tipis
+    backgroundColor: "rgba(255,255,255,0.85)",
   },
   headerTitle: {
     flex: 1,
@@ -202,7 +239,6 @@ const s = StyleSheet.create({
     marginBottom: 12,
   },
   input: { flex: 1, color: C.text, fontSize: 14 },
-  forgot: { color: C.sub, textAlign: "center", marginVertical: 12 },
 
   loginBtn: {
     backgroundColor: C.brand,
