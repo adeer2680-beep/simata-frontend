@@ -1,74 +1,81 @@
-import React, { useMemo, useState } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from "react-native";
+// app/kalender.tsx
+import React, { useEffect, useMemo, useState } from "react";
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  ScrollView,
+  ActivityIndicator,
+  SafeAreaView,
+} from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
+import axios from "axios";
 
-/** ==== CONFIG WARNA ==== */
+// ==== CONFIG WARNA ====
 const C = {
+  brand: "#42909b",
   bg: "#ffffff",
   text: "#0f172a",
   sub: "#475569",
   border: "#e5e7eb",
   soft: "#f8fafc",
-  holiday: "#dc2626", // merah libur
+  holiday: "#dc2626",
   sunday: "#dc2626",
 };
 
+// ==== UTIL ====
 const WEEK_DAYS = ["Ahad", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"];
 const CELL = 7;
 
-/** ==== DATA LIBUR NASIONAL (contoh, 2025 – tambahkan/ubah sesuai kebutuhan) ==== 
- * format: YYYY-MM-DD (waktu lokal Indonesia)
- * Catatan: beberapa hari libur keagamaan sifatnya tentatif; sesuaikan kalender resmi sekolah/kemenag pemda kamu.
- */
-const HOLIDAYS_2025: { date: string; title: string }[] = [
-  { date: "2025-01-01", title: "Tahun Baru Masehi" },
-  { date: "2025-01-27", title: "Tahun Baru Imlek 2576" },
-  { date: "2025-03-31", title: "Isra Mikraj Nabi Muhammad SAW" },
-  { date: "2025-04-18", title: "Wafat Isa Almasih (Jumat Agung)" },
-  { date: "2025-04-20", title: "Paskah" },
-  { date: "2025-04-29", title: "Hari Raya Idulfitri 1446 H" },
-  { date: "2025-04-30", title: "Cuti Bersama Idulfitri (opsional)" },
-  { date: "2025-05-01", title: "Hari Buruh Internasional" },
-  { date: "2025-05-12", title: "Hari Raya Waisak" },
-  { date: "2025-05-29", title: "Kenaikan Isa Almasih" },
-  { date: "2025-06-01", title: "Hari Lahir Pancasila" },
-  { date: "2025-06-06", title: "Iduladha 1446 H" },
-  { date: "2025-06-27", title: "Tahun Baru Islam 1447 H" },
-  { date: "2025-08-17", title: "Hari Kemerdekaan RI" },
-  { date: "2025-09-05", title: "Maulid Nabi Muhammad SAW" },
-  // contoh libur lokal/instansi (opsional)
-  // { date: "2025-09-19", title: "Hari Lahir Lembaga Pendidikan Ma'arif NU" },
-];
-
-/** ==== UTIL TANGGAL ==== */
 function addMonths(d: Date, delta: number) {
-  const nd = new Date(d.getFullYear(), d.getMonth() + delta, 1);
-  return nd;
+  return new Date(d.getFullYear(), d.getMonth() + delta, 1);
 }
 function titleId(d: Date) {
   return d.toLocaleDateString("id-ID", { month: "long", year: "numeric", timeZone: "Asia/Jakarta" });
 }
 function ymdLocal(d: Date) {
-  // bikin YYYY-MM-DD dari komponen lokal (hindari offset zona)
   const y = d.getFullYear();
   const m = d.getMonth() + 1;
   const day = d.getDate();
-  const mm = m < 10 ? `0${m}` : `${m}`;
-  const dd = day < 10 ? `0${day}` : `${day}`;
-  return `${y}-${mm}-${dd}`;
+  return `${y}-${m < 10 ? "0" + m : m}-${day < 10 ? "0" + day : day}`;
 }
 
-type Cell = {
-  key: string;
-  date: Date;
-  inMonth: boolean;
-  isSunday: boolean;
-  holidayTitle?: string;
-};
+// ==== API CONFIG ====
+// Pilih host sesuai platform (emulator Android vs web/iOS)
+import { Platform } from "react-native";
 
-/** grid kalender (Ahad = kolom pertama) + flag libur otomatis */
-function useCalendar(cursor: Date) {
+const API_BASE =
+  Platform.OS === "android"
+    ? "http://10.0.2.2:8000/api"
+    : "http://localhost:8000/api";
+
+// Endpoint index kalender-akademik (tanpa /kalender di belakang)
+const KALENDER_URL = `${API_BASE}/kalender-akademik`;
+
+async function fetchMonthEvents(year: number, monthIndex0: number) {
+  const month1 = monthIndex0 + 1;
+  // kalau backendmu support filter query, keep ini; kalau tidak, query akan diabaikan tapi tetap 200
+  const url = `${KALENDER_URL}?year=${year}&month=${month1}`;
+
+  try {
+    console.log("GET", url);
+    const { data } = await axios.get(url, { timeout: 15000 });
+    // sesuaikan shape responsemu; sementara aman-kan default ke array kosong
+    return (data?.data ?? data ?? []);
+  } catch (err: any) {
+    console.log("ERR URL:", url);
+    console.log("ERR STATUS:", err?.response?.status);
+    console.log("ERR DATA:", err?.response?.data);
+    throw new Error(
+      `Gagal memuat kalender (${err?.response?.status ?? "?"})`
+    );
+  }
+}
+
+// ==== HOOK GRID ====
+function useCalendar(cursor: Date, holidays: { date: string; title: string }[]) {
   return useMemo(() => {
     const year = cursor.getFullYear();
     const month = cursor.getMonth();
@@ -77,119 +84,144 @@ function useCalendar(cursor: Date) {
     const last = new Date(year, month + 1, 0);
     const daysInMonth = last.getDate();
 
-    // Ahad=0…Sabtu=6
-    const leading = (first.getDay() + 7) % 7; // sel dari bulan sebelumnya
+    const leading = (first.getDay() + 7) % 7;
     const totalCells = Math.ceil((leading + daysInMonth) / 7) * 7;
 
     const start = new Date(year, month, 1 - leading);
-    const cells: Cell[] = [];
+    const holidayMap = new Map(holidays.map((h) => [h.date, h.title]));
 
-    for (let i = 0; i < totalCells; i++) {
+    const cells = Array.from({ length: totalCells }, (_, i) => {
       const d = new Date(start);
       d.setDate(start.getDate() + i);
-
       const iso = ymdLocal(d);
-      const holiday = HOLIDAYS_2025.find((h) => h.date === iso);
-
-      cells.push({
+      return {
         key: iso,
         date: d,
         inMonth: d.getMonth() === month,
         isSunday: d.getDay() === 0,
-        holidayTitle: holiday?.title,
-      });
-    }
+        holidayTitle: holidayMap.get(iso),
+      };
+    });
 
-    const title = titleId(cursor);
-    return { cells, title };
-  }, [cursor]);
+    return { cells, title: titleId(cursor) };
+  }, [cursor, holidays]);
 }
 
-/** ==== KOMPONEN UTAMA ==== */
+// ==== MAIN ====
 export default function KalenderPendidikan() {
   const today = new Date();
   const [cursor, setCursor] = useState(new Date(today.getFullYear(), today.getMonth(), 1));
-  const { cells, title } = useCalendar(cursor);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [remoteHolidays, setRemoteHolidays] = useState<{ date: string; title: string }[] | null>(null);
 
-  const goPrev = () => setCursor((d) => addMonths(d, -1));
-  const goNext = () => setCursor((d) => addMonths(d, +1));
-
-  // daftar libur bulan yang sedang ditampilkan
-  const monthHolidays = useMemo(() => {
-    const y = cursor.getFullYear();
-    const m = cursor.getMonth();
-    return HOLIDAYS_2025.filter((h) => {
-      const d = new Date(h.date);
-      return d.getFullYear() === y && d.getMonth() === m;
-    }).sort((a, b) => (a.date < b.date ? -1 : 1));
+  useEffect(() => {
+    let cancelled = false;
+    async function run() {
+      try {
+        setLoading(true);
+        setError(null);
+        const y = cursor.getFullYear();
+        const m0 = cursor.getMonth();
+        const data = await fetchMonthEvents(y, m0);
+        if (!cancelled) setRemoteHolidays(data?.length ? data : null);
+      } catch (e: any) {
+        if (!cancelled) {
+          setRemoteHolidays(null);
+          setError(e?.message ?? "Gagal memuat kalender.");
+        }
+      } finally {
+        !cancelled && setLoading(false);
+      }
+    }
+    run();
+    return () => { cancelled = true; };
   }, [cursor]);
 
+  const monthHolidays = remoteHolidays ?? [];
+  const { cells, title } = useCalendar(cursor, monthHolidays);
+
   return (
-    <View style={styles.container}>
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={{ marginRight: 12 }}>
-          <Ionicons name="arrow-back" size={22} color={C.text} />
+    <SafeAreaView style={s.container}>
+      {/* HEADER SERAGAM */}
+      <View style={s.header}>
+        <TouchableOpacity onPress={() => router.back()} activeOpacity={0.85} style={s.backBtn}>
+          <Ionicons name="chevron-back" size={22} color="#000" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Kalender Pendidikan</Text>
+        <Text style={s.headerTitle}>Kalender Pendidikan</Text>
+        <View style={{ width: 38 }} />
       </View>
 
       <ScrollView contentContainerStyle={{ padding: 16 }}>
         {/* Kartu Kalender */}
-        <View style={styles.card}>
-          {/* Navigasi Bulan */}
-          <View style={styles.monthHeader}>
-            <TouchableOpacity onPress={goPrev}>
+        <View style={s.card}>
+          <View style={s.monthHeader}>
+            <TouchableOpacity onPress={() => setCursor((d) => addMonths(d, -1))}>
               <Ionicons name="chevron-back" size={20} color={C.sub} />
             </TouchableOpacity>
-            <Text style={styles.monthTitle}>{title}</Text>
-            <TouchableOpacity onPress={goNext}>
+            <Text style={s.monthTitle}>{title}</Text>
+            <TouchableOpacity onPress={() => setCursor((d) => addMonths(d, 1))}>
               <Ionicons name="chevron-forward" size={20} color={C.sub} />
             </TouchableOpacity>
           </View>
 
           {/* Header hari */}
-          <View style={styles.weekHeaderRow}>
+          <View style={s.weekHeaderRow}>
             {WEEK_DAYS.map((d) => (
-              <View key={d} style={styles.weekHeaderCell}>
-                <Text style={[styles.weekHeaderText, d === "Ahad" && { color: C.sunday }]}>
-                  {d}
-                </Text>
+              <View key={d} style={s.weekHeaderCell}>
+                <Text style={[s.weekHeaderText, d === "Ahad" && { color: C.sunday }]}>{d}</Text>
               </View>
             ))}
           </View>
 
           {/* Grid tanggal */}
-          <View style={styles.grid}>
+          <View style={s.grid}>
             {cells.map((c) => {
               const day = c.date.getDate();
-              const isDim = !c.inMonth;
               const isHoliday = Boolean(c.holidayTitle);
-
               return (
-                <View key={c.key} style={styles.cell}>
+                <View key={c.key} style={s.cell}>
                   <Text
                     style={[
-                      styles.dayText,
-                      isDim && { color: "#94a3b8" },
+                      s.dayText,
+                      !c.inMonth && { color: "#94a3b8" },
                       c.inMonth && c.isSunday && { color: C.sunday, fontWeight: "700" },
                       isHoliday && c.inMonth && { color: C.holiday, fontWeight: "800" },
                     ]}
                   >
                     {day}
                   </Text>
-                  {isHoliday && c.inMonth && <Text style={styles.holidayDot}>●</Text>}
+                  {isHoliday && c.inMonth && <Text style={s.holidayDot}>●</Text>}
                 </View>
               );
             })}
           </View>
         </View>
 
-        {/* Daftar Libur Nasional (bulan aktif) */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Hari Libur Nasional</Text>
+        {/* Loading / Error */}
+        {loading && (
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8, padding: 8 }}>
+            <ActivityIndicator />
+            <Text style={{ color: C.sub }}>Memuat dari server…</Text>
+          </View>
+        )}
+        {error && (
+          <View style={{ padding: 8, borderRadius: 8, borderColor: "#fecaca", borderWidth: 1, backgroundColor: "#fff1f2" }}>
+            <Text style={{ color: "#b91c1c", marginBottom: 8 }}>Gagal memuat kalender: {error}</Text>
+            <TouchableOpacity
+              onPress={() => setCursor((d) => new Date(d))}
+              style={{ alignSelf: "flex-start", paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, backgroundColor: "#ef4444" }}
+            >
+              <Text style={{ color: "#fff", fontWeight: "700" }}>Coba lagi</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* Daftar Libur */}
+        <View style={s.section}>
+          <Text style={s.sectionTitle}>Hari Libur & Kegiatan</Text>
           {monthHolidays.length === 0 ? (
-            <Text style={styles.emptyText}>Tidak ada libur nasional bulan ini.</Text>
+            <Text style={s.emptyText}>Tidak ada libur/kegiatan bulan ini.</Text>
           ) : (
             monthHolidays.map((h) => {
               const d = new Date(h.date);
@@ -197,14 +229,14 @@ export default function KalenderPendidikan() {
               const bln = d.toLocaleDateString("id-ID", { month: "short" });
               const hari = d.toLocaleDateString("id-ID", { weekday: "long" });
               return (
-                <View key={h.date} style={styles.holidayRow}>
-                  <View style={styles.holidayDateBox}>
-                    <Text style={styles.holidayMon}>{bln}</Text>
-                    <Text style={styles.holidayDay}>{tgl}</Text>
+                <View key={h.date + h.title} style={s.holidayRow}>
+                  <View style={s.holidayDateBox}>
+                    <Text style={s.holidayMon}>{bln}</Text>
+                    <Text style={s.holidayDay}>{tgl}</Text>
                   </View>
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.holidayTitle}>{h.title}</Text>
-                    <Text style={styles.holidaySub}>{hari}, {tgl} {bln} {d.getFullYear()}</Text>
+                    <Text style={s.holidayTitle}>{h.title}</Text>
+                    <Text style={s.holidaySub}>{hari}, {tgl} {bln} {d.getFullYear()}</Text>
                   </View>
                 </View>
               );
@@ -214,23 +246,40 @@ export default function KalenderPendidikan() {
 
         <View style={{ height: 40 }} />
       </ScrollView>
-    </View>
+    </SafeAreaView>
   );
 }
 
-/** ==== STYLES ==== */
-const styles = StyleSheet.create({
+// ==== STYLES ====
+const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: C.bg },
 
+  // Header seragam
   header: {
+    backgroundColor: C.brand,
+    paddingHorizontal: 12,
+    paddingBottom: 12,
+    paddingTop: 12,
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: C.border,
+    gap: 8,
   },
-  headerTitle: { fontSize: 16, fontWeight: "700", color: C.text },
+  backBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.85)",
+  },
+  headerTitle: {
+    flex: 1,
+    textAlign: "center",
+    color: "#fff",
+    fontSize: 18,
+    fontWeight: "800",
+    letterSpacing: 0.3,
+  },
 
   card: {
     backgroundColor: C.bg,
@@ -250,12 +299,7 @@ const styles = StyleSheet.create({
   },
   monthTitle: { fontSize: 16, fontWeight: "700", color: C.text },
 
-  weekHeaderRow: {
-    flexDirection: "row",
-    backgroundColor: C.soft,
-    borderBottomWidth: 1,
-    borderBottomColor: C.border,
-  },
+  weekHeaderRow: { flexDirection: "row", backgroundColor: C.soft, borderBottomWidth: 1, borderBottomColor: C.border },
   weekHeaderCell: { width: `${100 / CELL}%`, alignItems: "center", paddingVertical: 8 },
   weekHeaderText: { fontSize: 12, fontWeight: "700", color: C.sub },
 
@@ -272,13 +316,7 @@ const styles = StyleSheet.create({
   dayText: { fontSize: 12, color: C.text },
   holidayDot: { marginTop: 2, fontSize: 10, color: C.holiday },
 
-  section: {
-    marginTop: 12,
-    backgroundColor: C.bg,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: C.border,
-  },
+  section: { marginTop: 12, backgroundColor: C.bg, borderRadius: 12, borderWidth: 1, borderColor: C.border },
   sectionTitle: {
     paddingHorizontal: 12,
     paddingVertical: 10,
@@ -290,17 +328,10 @@ const styles = StyleSheet.create({
   },
   emptyText: { padding: 12, color: C.sub },
 
-  holidayRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    gap: 12,
-  },
+  holidayRow: { flexDirection: "row", alignItems: "center", paddingHorizontal: 12, paddingVertical: 10, gap: 12 },
   holidayDateBox: { width: 54, alignItems: "flex-start", paddingRight: 6 },
   holidayMon: { color: C.sub, fontWeight: "700" },
   holidayDay: { color: C.text, fontWeight: "800", fontSize: 18, marginTop: -2 },
-
   holidayTitle: { color: C.text, fontWeight: "700" },
   holidaySub: { color: C.sub, fontSize: 12, marginTop: 2 },
 });

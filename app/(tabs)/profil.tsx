@@ -1,13 +1,16 @@
 // app/(tabs)/profil.tsx
-import React, { useState } from "react";
+import React, { useState, useCallback } from "react";
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
   TextInput,
+  Image,
+  Alert,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import * as ImagePicker from "expo-image-picker";
 
 const COLORS = {
   bg: "#ffffff",
@@ -17,20 +20,50 @@ const COLORS = {
   border: "#e5e7eb",
   brand: "#0ea5a3",
 };
+const AVATAR_SIZE = 104;
 
 export default function ProfilScreen() {
-  // Dummy data (nanti bisa ambil dari API atau AsyncStorage)
   const [username, setUsername] = useState("admin");
   const [nama, setNama] = useState("Nama Pegawai");
   const [unit, setUnit] = useState("Unit 1");
+
+  // foto profil
+  const [photoUri, setPhotoUri] = useState<string | null>(null);
 
   const [editing, setEditing] = useState(false);
 
   const handleSave = () => {
     setEditing(false);
-    // TODO: kirim ke backend kalau perlu
-    alert("Profil berhasil diperbarui!");
+    Alert.alert("Berhasil", "Profil berhasil diperbarui!");
   };
+
+  const pickImage = useCallback(async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== "granted") {
+      Alert.alert("Izin diperlukan", "Beri akses galeri untuk ganti foto.");
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 0.7,
+      allowsEditing: true,
+      aspect: [1, 1],
+    });
+    if (!result.canceled && result.assets?.[0]?.uri) {
+      setPhotoUri(result.assets[0].uri);
+    }
+  }, []);
+
+  const removeImage = useCallback(() => {
+    Alert.alert("Hapus Foto", "Yakin hapus foto profil?", [
+      { text: "Batal", style: "cancel" },
+      {
+        text: "Hapus",
+        style: "destructive",
+        onPress: () => setPhotoUri(null),
+      },
+    ]);
+  }, []);
 
   return (
     <View style={styles.container}>
@@ -39,23 +72,42 @@ export default function ProfilScreen() {
         <Text style={styles.headerTitle}>Profil</Text>
       </View>
 
+      {/* Avatar */}
+      <View style={styles.avatarSection}>
+        <View style={styles.avatarWrap}>
+          <View style={styles.avatarCircle}>
+            {photoUri ? (
+              <Image source={{ uri: photoUri }} style={styles.avatarImg} />
+            ) : (
+              <Ionicons name="person" size={56} color={COLORS.sub} />
+            )}
+          </View>
+
+          {/* Tombol kamera → ganti foto */}
+          <TouchableOpacity style={styles.cameraBtn} onPress={pickImage}>
+            <Ionicons name="camera" size={18} color="#fff" />
+          </TouchableOpacity>
+
+          {/* Tombol hapus → hanya muncul kalau ada foto */}
+          {photoUri && (
+            <TouchableOpacity style={styles.trashBtn} onPress={removeImage}>
+              <Ionicons name="trash" size={16} color="#fff" />
+            </TouchableOpacity>
+          )}
+        </View>
+      </View>
+
       {/* Konten */}
       <View style={styles.content}>
-        {/* Username */}
         <View style={styles.card}>
           {editing ? (
-            <TextInput
-              value={username}
-              onChangeText={setUsername}
-              style={styles.input}
-            />
+            <TextInput value={username} onChangeText={setUsername} style={styles.input} />
           ) : (
             <Text style={styles.value}>{username}</Text>
           )}
           <Text style={styles.label}>Username</Text>
         </View>
 
-        {/* Nama Pegawai */}
         <View style={styles.card}>
           {editing ? (
             <TextInput value={nama} onChangeText={setNama} style={styles.input} />
@@ -65,7 +117,6 @@ export default function ProfilScreen() {
           <Text style={styles.label}>Nama Pegawai</Text>
         </View>
 
-        {/* Unit */}
         <View style={styles.card}>
           {editing ? (
             <TextInput value={unit} onChangeText={setUnit} style={styles.input} />
@@ -75,7 +126,6 @@ export default function ProfilScreen() {
           <Text style={styles.label}>Unit</Text>
         </View>
 
-        {/* Tombol Edit / Simpan */}
         <TouchableOpacity
           style={styles.editBtn}
           onPress={() => (editing ? handleSave() : setEditing(true))}
@@ -97,6 +147,50 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.bg,
   },
   headerTitle: { fontSize: 16, fontWeight: "700", color: COLORS.text },
+
+  avatarSection: { alignItems: "center", paddingTop: 20, paddingBottom: 8 },
+  avatarWrap: { position: "relative" },
+  avatarCircle: {
+    width: AVATAR_SIZE,
+    height: AVATAR_SIZE,
+    borderRadius: AVATAR_SIZE / 2,
+    backgroundColor: "#fff",
+    borderWidth: 2,
+    borderColor: COLORS.brand,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  avatarImg: {
+    width: AVATAR_SIZE - 4,
+    height: AVATAR_SIZE - 4,
+    borderRadius: (AVATAR_SIZE - 4) / 2,
+  },
+  cameraBtn: {
+    position: "absolute",
+    right: -4,
+    bottom: -4,
+    backgroundColor: COLORS.brand,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 2,
+    borderColor: COLORS.bg,
+  },
+  trashBtn: {
+    position: "absolute",
+    left: -4,
+    bottom: -4,
+    backgroundColor: "#ef4444",
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 2,
+    borderColor: COLORS.bg,
+  },
 
   content: { padding: 16, gap: 16 },
   card: {
@@ -120,7 +214,6 @@ const styles = StyleSheet.create({
     borderBottomColor: COLORS.border,
     paddingVertical: 4,
   },
-
   editBtn: {
     marginTop: 20,
     backgroundColor: COLORS.brand,

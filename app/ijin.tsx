@@ -1,5 +1,5 @@
 // app/ijin.tsx
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   View,
   Text,
@@ -9,6 +9,7 @@ import {
   ScrollView,
   Alert,
   Platform,
+  StatusBar,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
@@ -19,14 +20,23 @@ const C = {
   sub: "#475569",
   border: "#e5e7eb",
   pill: "#f3f4f6",
-  brand: "#0ea5a3",
-  brandDim: "#86e6e3",
+  brand: "#42909b",
+  brandDim: "#77c3cc",
 };
 
+// ✅ pakai /ijins (jamak)
 const API_URL =
   Platform.OS === "android"
-    ? "http://10.0.2.2:8000/api/ijin" // Android emulator
-    : "http://localhost:8000/api/ijin"; // Web/iOS sim
+    ? "http://10.0.2.2:8000/api/ijins"
+    : "http://localhost:8000/api/ijins";
+
+// Helper: format tanggal ISO YYYY-MM-DD
+function toISODate(d: Date) {
+  const y = d.getFullYear();
+  const m = `${d.getMonth() + 1}`.padStart(2, "0");
+  const day = `${d.getDate()}`.padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
 
 export default function IjinScreen() {
   const [nama, setNama] = useState("");
@@ -35,17 +45,15 @@ export default function IjinScreen() {
   const [keterangan, setKeterangan] = useState("");
   const [loading, setLoading] = useState(false);
 
-  // Auto-isi tanggal hari ini (format ID)
+  // Auto-isi tanggal hari ini (ISO)
   useEffect(() => {
-    const now = new Date();
-    setTanggal(
-      now.toLocaleDateString("id-ID", {
-        year: "numeric",
-        month: "2-digit",
-        day: "2-digit",
-      })
-    );
+    setTanggal(toISODate(new Date()));
   }, []);
+
+  const isUnitNumeric = useMemo(
+    () => unit.trim() !== "" && !Number.isNaN(Number(unit)),
+    [unit]
+  );
 
   const handleSubmit = async () => {
     if (!nama || !unit || !tanggal || !keterangan) {
@@ -56,21 +64,42 @@ export default function IjinScreen() {
     try {
       setLoading(true);
 
-      // Kirim ke backend — sesuaikan field dengan backend kamu
+      // Payload fleksibel
+      const payload: Record<string, any> = {
+        nama: nama.trim(),
+        tanggal: tanggal.trim(), // ISO
+        keterangan: keterangan.trim(),
+      };
+      if (isUnitNumeric) {
+        payload.unit_id = Number(unit);
+      } else {
+        payload.unit = unit.trim();
+      }
+
       const res = await fetch(API_URL, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          nama,
-          unit,
-          tanggal,     // kalau backend butuh ISO, kirim new Date().toISOString().slice(0,10)
-          keterangan,
-        }),
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify(payload),
       });
 
+      const text = await res.text();
       if (!res.ok) {
-        const body = await res.text();
-        throw new Error(`HTTP ${res.status} ${body}`);
+        let msg = `HTTP ${res.status}`;
+        try {
+          const j = JSON.parse(text);
+          msg += j?.pesan ? ` – ${j.pesan}` : "";
+          if (j?.errors) {
+            const firstErr =
+              Object.values(j.errors).flat?.()[0] || JSON.stringify(j.errors);
+            msg += firstErr ? `\n${firstErr}` : "";
+          }
+        } catch {
+          msg += ` – ${text}`;
+        }
+        throw new Error(msg);
       }
 
       Alert.alert("Berhasil", "Pengajuan izin telah dikirim.");
@@ -85,12 +114,14 @@ export default function IjinScreen() {
 
   return (
     <View style={s.container}>
+      <StatusBar barStyle="light-content" backgroundColor={C.brand} />
+
       {/* Header */}
       <View style={s.header}>
         <TouchableOpacity onPress={() => router.back()} style={{ marginRight: 12 }}>
-          <Ionicons name="arrow-back" size={22} color={C.text} />
+          <Ionicons name="arrow-back" size={22} color="#fff" />
         </TouchableOpacity>
-        <Text style={s.headerTitle}>Ijin</Text>
+        <Text style={s.headerTitle}>Izin</Text>
       </View>
 
       <ScrollView contentContainerStyle={{ padding: 16 }}>
@@ -108,7 +139,7 @@ export default function IjinScreen() {
         {/* Unit */}
         <View style={s.pill}>
           <TextInput
-            placeholder="Unit"
+            placeholder="Unit (isi ID atau nama)"
             placeholderTextColor={C.sub}
             value={unit}
             onChangeText={setUnit}
@@ -119,7 +150,7 @@ export default function IjinScreen() {
         {/* Tanggal */}
         <View style={s.pill}>
           <TextInput
-            placeholder="Tanggal"
+            placeholder="Tanggal (YYYY-MM-DD)"
             placeholderTextColor={C.sub}
             value={tanggal}
             onChangeText={setTanggal}
@@ -156,16 +187,15 @@ export default function IjinScreen() {
 
 const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: C.bg },
+
   header: {
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 16,
     paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: C.border,
-    backgroundColor: C.bg,
+    backgroundColor: C.brand,
   },
-  headerTitle: { fontSize: 16, fontWeight: "700", color: C.text },
+  headerTitle: { fontSize: 16, fontWeight: "700", color: "#fff", flex: 1 },
 
   pill: {
     backgroundColor: C.pill,

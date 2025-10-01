@@ -1,4 +1,3 @@
-// app/doa.tsx
 import React, { useCallback, useEffect, useState } from "react";
 import {
   View,
@@ -9,17 +8,18 @@ import {
   ActivityIndicator,
   RefreshControl,
   Platform,
+  SafeAreaView,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 
 const COLORS = {
+  brand: "#42909b",
   bg: "#ffffff",
   text: "#0f172a",
   sub: "#475569",
   border: "#e5e7eb",
   card: "#f3f4f6",
-  brand: "#0ea5a3",
 };
 
 type DoaItem = {
@@ -30,7 +30,6 @@ type DoaItem = {
   artinya: string;
 };
 
-// Sesuaikan host sesuai platform (Android emulator ≠ localhost)
 const API_URL =
   Platform.OS === "android"
     ? "http://10.0.2.2:8000/api/doa"
@@ -46,18 +45,12 @@ export default function DoaHarianScreen() {
     setError(null);
     try {
       const res = await fetch(API_URL);
-      // Debug ringan (boleh dihapus nanti)
-      // console.log("[DOA] status:", res.status);
-
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json();
 
-      // >>>> PARSING DISINI DIBUAT MATCH BACKEND KAMU <<<<
-      // Backend kamu: { local: [...] }
-      // Tetap dukung bentuk lain kalau suatu saat berubah
       let items: DoaItem[] = [];
       if (Array.isArray(json)) items = json;
-      else if (Array.isArray(json?.local)) items = json.local;       // <— penting
+      else if (Array.isArray(json?.local)) items = json.local;
       else if (Array.isArray(json?.data)) items = json.data;
       else if (Array.isArray(json?.results)) items = json.results;
 
@@ -80,23 +73,26 @@ export default function DoaHarianScreen() {
     load();
   }, [load]);
 
-  return (
-    <View style={styles.container}>
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={{ marginRight: 12 }}>
-          <Ionicons name="arrow-back" size={22} color={COLORS.text} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Doa Harian</Text>
-      </View>
+  const Header = (
+    <View style={s.header}>
+      <TouchableOpacity onPress={() => router.back()} activeOpacity={0.85} style={s.backBtn}>
+        <Ionicons name="chevron-back" size={22} color="#000" />
+      </TouchableOpacity>
+      <Text style={s.headerTitle}>Doa Harian</Text>
+      <View style={{ width: 38 }} />
+    </View>
+  );
 
-      {/* Konten */}
+  return (
+    <SafeAreaView style={s.container}>
+      {Header}
+
       {loading ? (
         <ActivityIndicator style={{ marginTop: 20 }} size="large" color={COLORS.sub} />
       ) : error ? (
         <View style={{ padding: 16 }}>
           <Text style={{ color: "red", marginBottom: 8 }}>{error}</Text>
-          <TouchableOpacity onPress={load} style={styles.retryBtn}>
+          <TouchableOpacity onPress={load} style={s.retryBtn}>
             <Text style={{ color: "#fff", fontWeight: "700" }}>Coba Lagi</Text>
           </TouchableOpacity>
         </View>
@@ -106,20 +102,17 @@ export default function DoaHarianScreen() {
           keyExtractor={(item, i) => String(item.id ?? i)}
           contentContainerStyle={{ padding: 16 }}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
-          ItemSeparatorComponent={() => <View style={styles.separator} />}
+          ItemSeparatorComponent={() => <View style={s.separator} />}
           renderItem={({ item, index }) => (
-            <View style={styles.itemWrap}>
-              {/* nomor */}
-              <View style={styles.badge}>
-                <Text style={styles.badgeText}>{index + 1}</Text>
+            <View style={s.itemWrap}>
+              <View style={s.badge}>
+                <Text style={s.badgeText}>{index + 1}</Text>
               </View>
-
-              {/* konten doa */}
               <View style={{ flex: 1 }}>
-                <Text style={styles.title}>{item.judul}</Text>
-                <Text style={styles.arab}>{item.arab}</Text>
-                <Text style={styles.latin}>{item.latin}</Text>
-                <Text style={styles.meaning}>{item.artinya}</Text>
+                <Text style={s.title}>{item.judul}</Text>
+                <Text style={s.arab}>{item.arab}</Text>
+                <Text style={s.latin}>{item.latin}</Text>
+                <Text style={s.meaning}>{item.artinya}</Text>
               </View>
             </View>
           )}
@@ -128,23 +121,39 @@ export default function DoaHarianScreen() {
           }
         />
       )}
-    </View>
+    </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
+const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg },
 
+  // Header seragam
   header: {
+    backgroundColor: COLORS.brand,
+    paddingHorizontal: 12,
+    paddingBottom: 12,
+    paddingTop: 12,
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
-    backgroundColor: COLORS.bg,
+    gap: 8,
   },
-  headerTitle: { fontSize: 16, fontWeight: "700", color: COLORS.text },
+  backBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.85)",
+  },
+  headerTitle: {
+    flex: 1,
+    textAlign: "center",
+    color: "#fff",
+    fontSize: 18,
+    fontWeight: "800",
+    letterSpacing: 0.3,
+  },
 
   itemWrap: { flexDirection: "row", paddingVertical: 14 },
   badge: {

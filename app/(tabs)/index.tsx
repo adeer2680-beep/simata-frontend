@@ -1,33 +1,41 @@
+// app/index.tsx
+import { Entypo, Feather, Ionicons, MaterialIcons } from "@expo/vector-icons";
+import { Link, type Href } from "expo-router";
 import React, { useEffect, useMemo, useState } from "react";
 import {
-  SafeAreaView,
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
   FlatList,
   ListRenderItemInfo,
+  SafeAreaView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
   useWindowDimensions,
+  View,
+  Platform,
+  ActivityIndicator,
 } from "react-native";
-import { Link, type Href } from "expo-router";
-import { Ionicons, Feather, Entypo, MaterialIcons } from "@expo/vector-icons";
 
 const COLORS = {
+  brand: "#42909b",
   bg: "#ffffff",
-  soft: "#eef4ff",
-  card: "#f3f4f6",
+  card: "#ffffff",
+  soft: "#f3f4f6",
+  softBlue: "#eef4ff",
+  border: "#e5e7eb",
   text: "#0f172a",
   sub: "#334155",
-  brand: "#0ea5a3",
-};
+} as const;
 
-const MOCK_PRAYERS = [
-  { name: "Subuh", time: "04:20" },
-  { name: "Dzuhur", time: "11:40" },
-  { name: "Ashar", time: "15:00" },
-  { name: "Maghrib", time: "17:40" },
-  { name: "Isya", time: "18:50" },
-];
+const SHADOW = Platform.select({
+  ios: { shadowColor: "#000", shadowOpacity: 0.06, shadowRadius: 8, shadowOffset: { width: 0, height: 4 } },
+  android: { elevation: 3 },
+  default: {},
+});
+
+// ====== PRAYER API (MyQuran) CONFIG ======
+const MYQURAN_BASE = "https://api.myquran.com/v2/sholat";
+// Ubah sesuai kota kamu: "Bogor", "Jakarta", "Banjarmasin", dsb.
+const CITY_KEYWORD = "Mojokerto";
 
 type Item = {
   label: string;
@@ -37,37 +45,32 @@ type Item = {
 };
 
 const ITEMS: Item[] = [
-  { label: "Qur'an",     icon: "book-outline",               lib: "ion", href: "/quran" },
-  { label: "Do'a",       icon: "leaf-outline",               lib: "ion", href: "/doa" },
-  { label: "Berita",     icon: "newspaper-outline",          lib: "ion", href: "/(tabs)/berita" },
-  { label: "Siswa",      icon: "people-outline",             lib: "ion", href: "/siswa" },
-  { label: "Video",      icon: "play-circle-outline",        lib: "ion", href: "/video" },
-  { label: "Presensi",   icon: "checkmark-done-outline",     lib: "ion", href: "/presensi" },
-  { label: "PPDB",       icon: "assignment",                 lib: "mi",  href: "/ppdb" },
-  { label: "Inventaris", icon: "box",                        lib: "fe",  href: "/inventaris" },
-  { label: "Ijin",       icon: "text-document",              lib: "ent", href: "/ijin" },
-  { label: "Kalender Pendidikan", icon: "calendar-outline",  lib: "ion", href: "/kalender" },
-  { label: "Login",      icon: "log-in-outline",             lib: "ion", href: "/login" },
+  { label: "PPDB",       icon: "assignment",             lib: "mi",  href: "/ppdb" },
+  { label: "Presensi",   icon: "checkmark-done-outline", lib: "ion", href: "/presensi" },
+  { label: "Kalender Pendidikan", icon: "calendar-outline", lib: "ion", href: "/kalender" },
+  { label: "Ijin",       icon: "text-document",          lib: "ent", href: "/ijin" },
+  { label: "Laporan",    icon: "document-text-outline",  lib: "ion", href: "/laporan" },
+  { label: "Siswa",      icon: "people-outline",         lib: "ion", href: "/siswa" },
+  { label: "Inventaris", icon: "box",                    lib: "fe",  href: "/inventaris" },
+  { label: "Berita",     icon: "newspaper-outline",      lib: "ion", href: "/berita" },
+  { label: "Video",      icon: "play-circle-outline",    lib: "ion", href: "/video" },
+  { label: "Al-Qur'an",  icon: "book-outline",           lib: "ion", href: "/surah" },
+  { label: "Doa Harian", icon: "leaf-outline",           lib: "ion", href: "/doa" },
+  { label: "Login",      icon: "log-in-outline",         lib: "ion", href: "/login" },
 ];
 
+// ====== Icon switcher ======
 function IconSwitch({
-  name,
-  lib,
-  size = 24,
-  color = COLORS.text,
-}: {
-  name: string;
-  lib?: Item["lib"];
-  size?: number;
-  color?: string;
-}) {
-  if (lib === "mi") return <MaterialIcons name={name as any} size={size} color={color} />;
-  if (lib === "fe") return <Feather name={name as any} size={size} color={color} />;
-  if (lib === "ent") return <Entypo name={name as any} size={size} color={color} />;
+  name, lib, size = 26, color = COLORS.text,
+}: { name: string; lib?: Item["lib"]; size?: number; color?: string }) {
+  if (lib === "mi")  return <MaterialIcons name={name as any} size={size} color={color} />;
+  if (lib === "fe")  return <Feather        name={name as any} size={size} color={color} />;
+  if (lib === "ent") return <Entypo         name={name as any} size={size} color={color} />;
   return <Ionicons name={name as any} size={size} color={color} />;
 }
 
-function useClock() {
+// ====== Header clock dipisah agar tick per detik tidak ganggu komponen lain ======
+function HeaderClock() {
   const [now, setNow] = useState<Date>(new Date());
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 1000);
@@ -95,27 +98,155 @@ function useClock() {
       }).format(now),
     [now]
   );
-  return { fmtTime, fmtDate };
+
+  return (
+    <View style={styles.header}>
+      <Text style={styles.appTitle}>SIMATA</Text>
+      <View style={styles.clockRow}>
+        <Ionicons name="time-outline" size={18} color="#ffffff" />
+        <Text style={styles.clockText}>{fmtTime} WIB</Text>
+      </View>
+      <Text style={styles.dateText}>{fmtDate}</Text>
+    </View>
+  );
+}
+
+// ====== Shortcut card ======
+function ShortcutCard({
+  title,
+  subtitle,
+  icon,
+  href,
+}: {
+  title: string;
+  subtitle: string;
+  icon: React.ReactNode;
+  href: Href;
+}) {
+  const Card = (
+    <View style={[styles.shortcutCard, SHADOW]}>
+      <View style={styles.shortcutIcon}>{icon}</View>
+      <View style={{ flex: 1 }}>
+        <Text style={styles.shortcutTitle}>{title}</Text>
+        <Text style={styles.shortcutSub} numberOfLines={1}>
+          {subtitle}
+        </Text>
+      </View>
+      <Ionicons name="chevron-forward" size={18} color={COLORS.sub} />
+    </View>
+  );
+  return (
+    <Link href={href} asChild>
+      <TouchableOpacity activeOpacity={0.8}>{Card}</TouchableOpacity>
+    </Link>
+  );
+}
+
+// ====== PRAYER HOOK (fetch dari MyQuran) — hanya ketika ganti hari ======
+type PrayerRow = { name: string; time: string };
+function pad2(n: number) { return String(n).padStart(2, "0"); }
+
+function usePrayers(cityKeyword: string) {
+  const [prayers, setPrayers] = useState<PrayerRow[] | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [cityLabel, setCityLabel] = useState<string>(cityKeyword);
+  const [error, setError] = useState<string | null>(null);
+
+  // kunci hari (YYYY-MM-DD) → berubah sekali per hari
+  const [dateKey, setDateKey] = useState<string>(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+  });
+
+  // update dateKey tiap tengah malam lokal tanpa render per detik
+  useEffect(() => {
+    const now = new Date();
+    const msToMidnight =
+      new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 2).getTime() - now.getTime();
+    const t = setTimeout(() => {
+      const d = new Date();
+      setDateKey(`${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`);
+    }, Math.max(1000, msToMidnight));
+    return () => clearTimeout(t);
+  }, [dateKey]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function run() {
+      try {
+        setLoading(true);
+        setError(null);
+
+        // 1) Cari ID kota
+        const kotaRes = await fetch(`${MYQURAN_BASE}/kota/cari/${encodeURIComponent(cityKeyword)}`);
+        const kotaJson = await kotaRes.json();
+        const first = kotaJson?.data?.[0];
+        if (!first?.id) throw new Error("Kota tidak ditemukan");
+
+        const id = String(first.id);
+        setCityLabel(first.lokasi || first.nama || cityKeyword);
+
+        // 2) Ambil jadwal HARI INI (berdasarkan dateKey)
+        const [yyyy, mm, dd] = dateKey.split("-");
+        const jadwalRes = await fetch(`${MYQURAN_BASE}/jadwal/${id}/${yyyy}/${mm}/${dd}`);
+        const jadwalJson = await jadwalRes.json();
+        const j = jadwalJson?.data?.jadwal ?? jadwalJson?.data;
+
+        const pick = (obj: any, ...keys: string[]) => {
+          for (const k of keys) if (obj?.[k] != null) return obj[k];
+          return undefined;
+        };
+
+        const rows: PrayerRow[] = [
+          { name: "Subuh",   time: pick(j, "subuh", "Subuh", "Fajr")        ?? "-" },
+          { name: "Dzuhur",  time: pick(j, "dzuhur", "Dzuhur", "Dhuhr")     ?? "-" },
+          { name: "Ashar",   time: pick(j, "ashar", "Ashar", "Asr")         ?? "-" },
+          { name: "Maghrib", time: pick(j, "maghrib", "Maghrib", "Maghrib") ?? "-" },
+          { name: "Isya",    time: pick(j, "isya", "Isya", "Isha")          ?? "-" },
+        ];
+
+        if (!cancelled) setPrayers(rows);
+      } catch (e: any) {
+        if (!cancelled) {
+          setError(e?.message ?? "Gagal memuat jadwal");
+          setPrayers([
+            { name: "Subuh", time: "04:20" },
+            { name: "Dzuhur", time: "11:40" },
+            { name: "Ashar", time: "15:00" },
+            { name: "Maghrib", time: "17:40" },
+            { name: "Isya", time: "18:50" },
+          ]);
+        }
+      } finally {
+        !cancelled && setLoading(false);
+      }
+    }
+    run();
+    return () => { cancelled = true; };
+  }, [cityKeyword, dateKey]);
+
+  return { prayers, loading, error, cityLabel };
 }
 
 export default function Beranda() {
-  const { fmtTime, fmtDate } = useClock();
   const { width } = useWindowDimensions();
-
-  // responsif: atur jumlah kolom berdasarkan lebar layar
-  // <400px: 3 kolom, <768px: 4 kolom, sisanya 6 kolom (desktop)
   const numColumns = width < 400 ? 3 : width < 768 ? 4 : 6;
+
+  // Jadwal shalat (fetch 1x per hari)
+  const { prayers, loading: prayerLoading, error: prayerError, cityLabel } = usePrayers(CITY_KEYWORD);
 
   const renderItem = ({ item }: ListRenderItemInfo<Item>) => {
     const Card = (
-      <View style={styles.card}>
-        <IconSwitch name={item.icon} lib={item.lib} size={26} color={COLORS.text} />
+      <View style={[styles.card, SHADOW]}>
+        <View style={styles.cardIconWrap}>
+          <IconSwitch name={item.icon} lib={item.lib} />
+        </View>
         <Text style={styles.cardLabel}>{item.label}</Text>
       </View>
     );
     return item.href ? (
       <Link href={item.href} asChild>
-        <TouchableOpacity activeOpacity={0.7} style={styles.cardTouchable}>
+        <TouchableOpacity activeOpacity={0.8} style={styles.cardTouchable}>
           {Card}
         </TouchableOpacity>
       </Link>
@@ -126,112 +257,100 @@ export default function Beranda() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: COLORS.bg }}>
-      {/* Header + Jam */}
-      <View style={styles.header}>
-        <Text style={styles.appTitle}>SIMATA</Text>
-        <View style={styles.clockRow}>
-          <Ionicons name="time-outline" size={18} color={COLORS.brand} />
-          <Text style={styles.clockText}>{fmtTime} WIB</Text>
-        </View>
-        <Text style={styles.dateText}>{fmtDate}</Text>
-      </View>
+      {/* HEADER (terpisah supaya tick 1 detik tidak ganggu layout) */}
+      <HeaderClock />
 
-      {/* Jadwal Sholat */}
-      <View style={styles.prayerWrap}>
-        <Text style={styles.sectionTitle}>Jadwal Sholat Hari Ini (WIB)</Text>
-        <View style={styles.chipsRow}>
-          {MOCK_PRAYERS.map((p) => (
-            <View key={p.name} style={styles.chip}>
-              <Text style={styles.chipName}>{p.name}</Text>
-              <Text style={styles.chipTime}>{p.time}</Text>
+      {/* JADWAL SHOLAT */}
+      <View style={[styles.prayerWrap, SHADOW]}>
+        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+          <Text style={styles.sectionTitle}>Jadwal Sholat Hari Ini (WIB)</Text>
+          <Text style={styles.cityText}>{cityLabel}</Text>
+        </View>
+
+        {prayerLoading ? (
+          <View style={{ paddingVertical: 10 }}>
+            <ActivityIndicator />
+          </View>
+        ) : (
+          <>
+            {!!prayerError && (
+              <Text style={styles.errorText}>Gagal memuat jadwal: {prayerError}</Text>
+            )}
+            <View style={styles.chipsRow}>
+              {(prayers ?? []).map((p) => (
+                <View key={p.name} style={[styles.chip, SHADOW]}>
+                  <Text style={styles.chipName}>{p.name}</Text>
+                  <Text style={styles.chipTime}>{p.time}</Text>
+                </View>
+              ))}
             </View>
-          ))}
-        </View>
+          </>
+        )}
       </View>
 
-      {/* Grid Menu (FlatList, multi-kolom) */}
+      {/* GRID + FOOTER SHORTCUTS */}
+      <Text style={styles.gridHeading}>Menu Utama</Text>
       <FlatList
         data={ITEMS}
         keyExtractor={(it) => it.label}
         renderItem={renderItem}
         numColumns={numColumns}
         columnWrapperStyle={{ justifyContent: "flex-start", gap: 12, paddingHorizontal: 12 }}
-        contentContainerStyle={{ paddingBottom: 120, rowGap: 12 }}
         showsVerticalScrollIndicator={false}
+        ListFooterComponent={
+          <View style={{ marginTop: 12, marginBottom: 120 }}>
+            <Text style={styles.gridHeading}>Shortcut</Text>
+            <View style={styles.shortcutsWrap}>
+              <ShortcutCard
+                title="Berita"
+                subtitle="Tekan untuk melihat semua berita"
+                href={"/berita"}
+                icon={<Ionicons name="newspaper" size={22} color={COLORS.brand} />}
+              />
+              <ShortcutCard
+                title="Doa Harian"
+                subtitle="Tekan untuk melihat daftar doa"
+                href={"/doa"}
+                icon={<Ionicons name="book" size={22} color={COLORS.brand} />}
+              />
+            </View>
+          </View>
+        }
+        contentContainerStyle={{ rowGap: 12, paddingBottom: 0 }}
       />
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  header: {
-    paddingHorizontal: 16,
-    paddingTop: 8,
-    paddingBottom: 12,
-    backgroundColor: COLORS.bg,
-  },
-  appTitle: {
-    fontSize: 26,
-    fontWeight: "800",
-    color: COLORS.text,
-    letterSpacing: 0.5,
-    marginBottom: 4,
-  },
-  clockRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-  },
-  clockText: { fontSize: 16, fontWeight: "700", color: COLORS.brand },
-  dateText: { marginTop: 2, fontSize: 13, color: COLORS.sub, fontWeight: "500" },
+  // HEADER
+  header: { paddingHorizontal: 16, paddingTop: 20, paddingBottom: 20, backgroundColor: COLORS.brand },
+  appTitle: { fontSize: 26, fontWeight: "800", color: "#ffffff", letterSpacing: 0.5, marginBottom: 6 },
+  clockRow: { flexDirection: "row", alignItems: "center", gap: 6 },
+  clockText: { fontSize: 16, fontWeight: "700", color: "#ffffff" },
+  dateText: { marginTop: 2, fontSize: 13, color: "#f3f4f6", fontWeight: "600" },
 
-  prayerWrap: {
-    backgroundColor: COLORS.soft,
-    marginHorizontal: 12,
-    padding: 12,
-    borderRadius: 16,
-    marginTop: 8,
-    marginBottom: 8,
-  },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: "700",
-    color: COLORS.text,
-    marginBottom: 10,
-  },
-  chipsRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-  },
-  chip: {
-    backgroundColor: "#ffffff",
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    borderRadius: 12,
-    minWidth: 78,
-    alignItems: "center",
-    elevation: 1,
-  },
-  chipName: { fontSize: 12, color: COLORS.sub, fontWeight: "600" },
+  // PRAYER
+  prayerWrap: { backgroundColor: COLORS.softBlue, marginHorizontal: 12, padding: 12, borderRadius: 16, marginTop: -14, borderWidth: 1, borderColor: COLORS.border },
+  sectionTitle: { fontSize: 16, fontWeight: "700", color: COLORS.text },
+  cityText: { fontSize: 12, color: COLORS.sub, fontWeight: "700" },
+  errorText: { color: "#b91c1c", marginBottom: 6, fontSize: 12 },
+  chipsRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 6 },
+  chip: { backgroundColor: "#ffffff", paddingVertical: 10, paddingHorizontal: 12, borderRadius: 12, minWidth: 78, alignItems: "center", borderWidth: 1, borderColor: COLORS.border },
+  chipName: { fontSize: 12, color: COLORS.sub, fontWeight: "700" },
   chipTime: { fontSize: 16, color: COLORS.text, fontWeight: "800" },
 
-  cardTouchable: {
-    flex: 1,
-  },
-  card: {
-    backgroundColor: COLORS.card,
-    borderRadius: 16,
-    height: 92,
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    paddingHorizontal: 8,
-  },
-  cardLabel: {
-    fontSize: 13,
-    color: COLORS.text,
-    fontWeight: "600",
-    textAlign: "center",
-  },
+  // GRID
+  gridHeading: { marginTop: 12, marginBottom: 8, marginHorizontal: 12, fontSize: 14, color: COLORS.sub, fontWeight: "700" },
+  cardTouchable: { flex: 1 },
+  card: { backgroundColor: COLORS.card, borderRadius: 16, height: 92, alignItems: "center", justifyContent: "center", gap: 10, paddingHorizontal: 8, borderWidth: 1, borderColor: COLORS.border },
+  cardIconWrap: { width: 40, height: 40, borderRadius: 14, alignItems: "center", justifyContent: "center", backgroundColor: "#ffffff", borderWidth: 1, borderColor: COLORS.border },
+  cardLabel: { fontSize: 13, color: COLORS.text, fontWeight: "700", textAlign: "center" },
+
+  // SHORTCUTS (footer)
+  shortcutsWrap: { gap: 10, marginHorizontal: 12 },
+  shortcutCard: { flexDirection: "row", alignItems: "center", backgroundColor: COLORS.card, padding: 14, borderRadius: 14, borderWidth: 1, borderColor: COLORS.border, gap: 12 },
+  shortcutIcon: { width: 38, height: 38, borderRadius: 12, backgroundColor: COLORS.soft, alignItems: "center", justifyContent: "center" },
+  shortcutTitle: { fontSize: 15, fontWeight: "800", color: COLORS.text },
+  shortcutSub: { fontSize: 12, color: COLORS.sub, marginTop: 2 },
 });

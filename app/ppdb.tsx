@@ -1,7 +1,14 @@
 // app/ppdb.tsx
 import React, { useEffect, useRef, useState } from "react";
 import {
-  View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Platform, Linking,
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  ActivityIndicator,
+  Platform,
+  Linking,
+  SafeAreaView,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
@@ -9,14 +16,21 @@ import { WebView } from "react-native-webview";
 
 const PPDB_URL = "https://ppdb.sitpermata.id/";
 
-const C = { bg:"#fff", text:"#0f172a", sub:"#475569", border:"#e5e7eb", brand:"#0ea5a3" };
+// Palette diseragamkan dengan brand teal mockup
+const C = {
+  bg: "#ffffff",
+  text: "#0f172a",
+  sub: "#475569",
+  border: "#e5e7eb",
+  brand: "#42909b", // ⬅️ teal seperti mockup
+} as const;
 
 export default function PPDBScreen() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
-  const webref = useRef<any>(null);
+  const webref = useRef<WebView>(null);
 
-  // Web: langsung buka tab baru (karena iframe diblokir)
+  // Web: banyak situs blok iframe (X-Frame-Options/CSP). Buka tab baru dan tampilkan fallback.
   useEffect(() => {
     if (Platform.OS === "web") {
       try {
@@ -35,27 +49,30 @@ export default function PPDBScreen() {
     }
   };
 
-  return (
-    <View style={s.container}>
-      {/* Header */}
-      <View style={s.header}>
-        <TouchableOpacity onPress={() => router.back()} style={{ marginRight: 12 }}>
-          <Ionicons name="arrow-back" size={22} color={C.text} />
-        </TouchableOpacity>
-        <Text style={s.title}>PPDB</Text>
-        <View style={{ width: 22 }} />
-      </View>
+  const Header = (
+    <View style={s.header}>
+      <TouchableOpacity onPress={() => router.back()} activeOpacity={0.85} style={s.backBtn}>
+        <Ionicons name="chevron-back" size={22} color="#fff" />
+      </TouchableOpacity>
+      <Text style={s.title}>PPDB</Text>
+      {/* spacer kanan supaya title tetap center */}
+      <View style={{ width: 38 }} />
+    </View>
+  );
 
-      {/* Konten */}
+  return (
+    <SafeAreaView style={s.container}>
+      {Header}
+
       <View style={{ flex: 1 }}>
         {Platform.OS === "web" ? (
-          // Web tidak render iframe (diblokir). Tampilkan info + tombol.
+          // Fallback web (iframe diblokir)
           <View style={s.centerBox}>
-            <Text style={{ color: C.sub, textAlign: "center", marginBottom: 10 }}>
+            <Text style={s.webInfoText}>
               Situs PPDB tidak mengizinkan ditampilkan di dalam aplikasi (iframe).
             </Text>
-            <TouchableOpacity onPress={openExternal} style={s.btn}>
-              <Text style={s.btnText}>Buka PPDB di Tab Baru</Text>
+            <TouchableOpacity onPress={openExternal} activeOpacity={0.92} style={s.btnPrimary}>
+              <Text style={s.btnPrimaryText}>Buka PPDB di Tab Baru</Text>
             </TouchableOpacity>
           </View>
         ) : (
@@ -63,7 +80,10 @@ export default function PPDBScreen() {
             <WebView
               ref={webref}
               source={{ uri: PPDB_URL }}
-              onLoadStart={() => { setLoading(true); setErr(null); }}
+              onLoadStart={() => {
+                setLoading(true);
+                setErr(null);
+              }}
               onLoadEnd={() => setLoading(false)}
               onError={(e: any) => {
                 setLoading(false);
@@ -82,16 +102,17 @@ export default function PPDBScreen() {
 
             {err && (
               <View style={s.errorBox}>
-                <Text style={{ color: "red", marginBottom: 8 }}>{err}</Text>
-                <View style={{ flexDirection: "row", gap: 10 }}>
+                <Text style={{ color: "#ef4444", marginBottom: 8, textAlign: "center" }}>{err}</Text>
+                <View style={{ flexDirection: "row", gap: 10, justifyContent: "center" }}>
                   <TouchableOpacity
                     onPress={() => webref.current?.reload()}
-                    style={[s.btn, { backgroundColor: C.brand }]}
+                    activeOpacity={0.92}
+                    style={s.btnPrimary}
                   >
-                    <Text style={s.btnText}>Muat Ulang</Text>
+                    <Text style={s.btnPrimaryText}>Muat Ulang</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity onPress={openExternal} style={s.btnGhost}>
-                    <Text style={{ color: C.brand, fontWeight: "700" }}>Buka di Browser</Text>
+                  <TouchableOpacity onPress={openExternal} activeOpacity={0.92} style={s.btnGhost}>
+                    <Text style={s.btnGhostText}>Buka di Browser</Text>
                   </TouchableOpacity>
                 </View>
               </View>
@@ -99,41 +120,80 @@ export default function PPDBScreen() {
           </>
         )}
       </View>
-    </View>
+    </SafeAreaView>
   );
 }
 
 const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: C.bg },
-  header: {
-    flexDirection: "row", alignItems: "center",
-    paddingHorizontal: 16, paddingVertical: 12,
-    borderBottomWidth: 1, borderBottomColor: C.border,
-  },
-  title: { fontSize: 16, fontWeight: "700", color: C.text },
 
+  // HEADER: teal + back button bulat transparan + title putih center
+  header: {
+    backgroundColor: C.brand,
+    paddingHorizontal: 12,
+    paddingBottom: 12,
+    paddingTop: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    borderBottomWidth: 0,
+  },
+  backBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.18)",
+  },
+  title: {
+    flex: 1,
+    textAlign: "center",
+    color: "#fff",
+    fontSize: 18,
+    fontWeight: "800",
+    letterSpacing: 0.3,
+  },
+
+  // LOADING overlay
   overlay: {
     ...StyleSheet.absoluteFillObject,
-    alignItems: "center", justifyContent: "center",
+    alignItems: "center",
+    justifyContent: "center",
     backgroundColor: "rgba(255,255,255,0.6)",
   },
 
+  // ERROR / INFO
   errorBox: {
-    position: "absolute", left: 16, right: 16, bottom: 20,
-    backgroundColor: "#fff", borderWidth: 1, borderColor: C.border,
-    borderRadius: 12, padding: 12,
+    position: "absolute",
+    left: 16,
+    right: 16,
+    bottom: 20,
+    backgroundColor: "#fff",
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 12,
+    padding: 12,
   },
+  centerBox: { flex: 1, alignItems: "center", justifyContent: "center", padding: 16, gap: 12 },
+  webInfoText: { color: C.sub, textAlign: "center" },
 
-  centerBox: { flex: 1, alignItems: "center", justifyContent: "center", padding: 16 },
-
-  btn: {
-    backgroundColor: C.brand, paddingHorizontal: 14, paddingVertical: 10,
-    borderRadius: 10, alignItems: "center",
-  },
-  btnText: { color: "#fff", fontWeight: "700" },
-  btnGhost: {
-    paddingHorizontal: 14, paddingVertical: 10,
-    borderRadius: 10, borderWidth: 1, borderColor: C.brand,
+  // BUTTONS
+  btnPrimary: {
+    backgroundColor: C.brand,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 10,
     alignItems: "center",
   },
+  btnPrimaryText: { color: "#fff", fontWeight: "800", letterSpacing: 0.2 },
+  btnGhost: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: C.brand,
+    alignItems: "center",
+  },
+  btnGhostText: { color: C.brand, fontWeight: "800", letterSpacing: 0.2 },
 });

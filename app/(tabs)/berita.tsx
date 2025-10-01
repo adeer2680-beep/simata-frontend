@@ -1,110 +1,223 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useRef, useState } from "react";
 import {
   View,
   Text,
   StyleSheet,
-  FlatList,
   ActivityIndicator,
+  Pressable,
+  Platform,
+  BackHandler,
+  Linking,
   TouchableOpacity,
-  Image,
+  SafeAreaView,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { router } from "expo-router";
+import { router, Stack, useFocusEffect } from "expo-router";
 
-const API_URL = "http://localhost:8000/api/berita"; // ganti dengan URL backend-mu
+// URL berita
+const NEWS_URL = "https://yayasansitpermata.blogspot.com/p/tentang-kami.html";
 
-const C = { bg: "#fff", text: "#0f172a", sub: "#475569", border: "#e5e7eb", brand: "#0ea5a3" };
+// Import WebView hanya di native (Android/iOS)
+let WebViewComp: any = null;
+if (Platform.OS !== "web") {
+  WebViewComp = require("react-native-webview").WebView;
+}
+
+const C = {
+  brand: "#42909b",
+  bg: "#ffffff",
+  text: "#0f172a",
+  sub: "#475569",
+  border: "#e5e7eb",
+};
 
 export default function BeritaScreen() {
-  const [data, setData] = useState<any[]>([]);
+  const webRef = useRef<any>(null);
   const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState<string | null>(null);
+  const [canGoBack, setCanGoBack] = useState(false);
+  const [hasError, setHasError] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
 
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const res = await fetch(API_URL);
-        if (!res.ok) throw new Error("Gagal mengambil data berita");
-        const json = await res.json();
-        setData(json);
-      } catch (e: any) {
-        setErr(e.message);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchData();
-  }, []);
-
-  const renderItem = ({ item }: { item: any }) => (
-    <TouchableOpacity style={s.card}>
-      {item.gambar && (
-        <Image source={{ uri: item.gambar }} style={s.image} resizeMode="cover" />
-      )}
-      <View style={{ flex: 1 }}>
-        <Text style={s.title}>{item.judul}</Text>
-        <Text style={s.date}>{item.tanggal}</Text>
-        <Text numberOfLines={2} style={s.snippet}>{item.isi}</Text>
-      </View>
-    </TouchableOpacity>
+  // Tangani tombol back Android untuk kembali di dalam WebView
+  useFocusEffect(
+    useCallback(() => {
+      const onBack = () => {
+        if (canGoBack && webRef.current) {
+          webRef.current.goBack();
+          return true;
+        }
+        return false;
+      };
+      const sub = BackHandler.addEventListener("hardwareBackPress", onBack);
+      return () => sub.remove();
+    }, [canGoBack])
   );
 
-  return (
-    <View style={s.container}>
-      {/* Header */}
-      <View style={s.header}>
-        <TouchableOpacity onPress={() => router.back()} style={{ marginRight: 12 }}>
-          <Ionicons name="arrow-back" size={22} color={C.text} />
-        </TouchableOpacity>
-        <Text style={s.headerTitle}>Berita</Text>
-        <View style={{ width: 22 }} />
-      </View>
+  const onReload = () => {
+    setHasError(false);
+    setReloadKey((k) => k + 1);
+  };
 
-      {loading ? (
-        <View style={s.center}>
-          <ActivityIndicator size="large" color={C.brand} />
-          <Text style={{ marginTop: 8, color: C.sub }}>Memuat berita…</Text>
-        </View>
-      ) : err ? (
-        <View style={s.center}>
-          <Text style={{ color: "red" }}>{err}</Text>
-        </View>
-      ) : (
-        <FlatList
-          data={data}
-          renderItem={renderItem}
-          keyExtractor={(item) => item.id.toString()}
-          contentContainerStyle={{ padding: 16 }}
-          ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
-        />
-      )}
+  const openExternal = () => {
+    if (Platform.OS === "web") {
+      window.open(NEWS_URL, "_blank");
+    } else {
+      Linking.openURL(NEWS_URL);
+    }
+  };
+
+  const Header = (
+    <View style={s.header}>
+      <TouchableOpacity onPress={() => router.back()} activeOpacity={0.85} style={s.backBtn}>
+        <Ionicons name="chevron-back" size={22} color="#000" /> {/* Back hitam */}
+      </TouchableOpacity>
+      <Text style={s.title}>Berita</Text>
+      <View style={{ width: 38 }} />
     </View>
+  );
+
+  // Fallback untuk platform Web
+  if (Platform.OS === "web") {
+    return (
+      <SafeAreaView style={s.fill}>
+        {Header}
+        <View style={[s.fill, s.center, { padding: 16 }]}>
+          <Text style={s.subtitle}>Buka halaman di tab baru:</Text>
+          <Pressable style={s.btnPrimary} onPress={openExternal}>
+            <Text style={s.btnPrimaryText}>Buka Berita</Text>
+          </Pressable>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  return (
+    <SafeAreaView style={s.fill}>
+      <Stack.Screen options={{ headerShown: false }} />
+      {Header}
+
+      <WebViewComp
+        key={reloadKey}
+        ref={webRef}
+        source={{ uri: NEWS_URL }}
+        style={s.fill}
+        onLoadStart={() => {
+          setLoading(true);
+          setHasError(false);
+        }}
+        onLoadEnd={() => setLoading(false)}
+        onError={() => {
+          setLoading(false);
+          setHasError(true);
+        }}
+        onNavigationStateChange={(navState: any) => setCanGoBack(navState.canGoBack)}
+        javaScriptEnabled
+        domStorageEnabled
+        allowsBackForwardNavigationGestures
+        pullToRefreshEnabled
+      />
+
+      {/* Loading overlay */}
+      {loading && !hasError && (
+        <View style={s.loading}>
+          <ActivityIndicator size="large" color={C.sub} />
+          <Text style={s.loadingText}>Memuat…</Text>
+        </View>
+      )}
+
+      {/* Error fallback */}
+      {hasError && (
+        <View style={[s.fill, s.center, { backgroundColor: "#fff", padding: 16 }]}>
+          <Text style={s.errTitle}>Gagal memuat halaman</Text>
+          <Text style={s.errSub}>Periksa koneksi internet kamu.</Text>
+
+          <View style={{ height: 12 }} />
+
+          <Pressable style={s.btnPrimary} onPress={onReload}>
+            <Text style={s.btnPrimaryText}>Coba Lagi</Text>
+          </Pressable>
+
+          <View style={{ height: 8 }} />
+
+          <Pressable style={s.btnGhost} onPress={openExternal}>
+            <Text style={s.btnGhostText}>Buka di Browser</Text>
+          </Pressable>
+        </View>
+      )}
+    </SafeAreaView>
   );
 }
 
 const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: C.bg },
+  fill: { flex: 1, backgroundColor: C.bg },
+  center: { alignItems: "center", justifyContent: "center" },
+
+  // Header seragam
   header: {
-    flexDirection: "row", alignItems: "center",
-    paddingHorizontal: 16, paddingVertical: 12,
-    borderBottomWidth: 1, borderBottomColor: C.border,
-  },
-  headerTitle: { fontSize: 16, fontWeight: "700", color: C.text },
-
-  card: {
-    backgroundColor: "#f9fafb",
-    borderRadius: 12,
-    padding: 12,
+    backgroundColor: C.brand,
+    paddingHorizontal: 12,
+    paddingBottom: 12,
+    paddingTop: 12,
     flexDirection: "row",
-    alignItems: "flex-start",
-    gap: 10,
-    borderWidth: 1,
-    borderColor: "#e5e7eb",
+    alignItems: "center",
+    gap: 8,
   },
-  image: { width: 60, height: 60, borderRadius: 8 },
-  title: { fontSize: 14, fontWeight: "700", color: C.text, marginBottom: 4 },
-  date: { fontSize: 12, color: C.sub, marginBottom: 4 },
-  snippet: { fontSize: 13, color: C.text },
+  backBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.85)", // putih tipis
+  },
+  title: {
+    flex: 1,
+    textAlign: "center",
+    color: "#fff",
+    fontSize: 18,
+    fontWeight: "800",
+    letterSpacing: 0.3,
+  },
 
-  center: { flex: 1, alignItems: "center", justifyContent: "center" },
+  // Loading
+  loading: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(248,250,252,0.6)",
+  },
+  loadingText: {
+    marginTop: 8,
+    color: C.text,
+    fontWeight: "600",
+  },
+
+  // Buttons
+  btnPrimary: {
+    backgroundColor: C.brand,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 12,
+    alignItems: "center",
+  },
+  btnPrimaryText: { color: "#000", fontWeight: "700" }, // teks hitam
+  btnGhost: {
+    marginTop: 8,
+    backgroundColor: "transparent",
+    borderWidth: 1,
+    borderColor: C.brand,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 12,
+    alignItems: "center",
+  },
+  btnGhostText: { color: C.brand, fontWeight: "700" },
+
+  subtitle: { color: C.sub, marginBottom: 16 },
+  errTitle: { fontSize: 18, fontWeight: "800", color: C.text },
+  errSub: { color: "#64748b", marginTop: 4 },
 });

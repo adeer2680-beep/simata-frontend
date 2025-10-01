@@ -1,25 +1,30 @@
-// app/inventaris.tsx
 import React, { useEffect, useRef, useState } from "react";
 import {
   View, Text, StyleSheet, TouchableOpacity,
-  ActivityIndicator, Platform, Linking,
+  ActivityIndicator, Platform, Linking, SafeAreaView
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { router } from "expo-router";
+import { router, Stack } from "expo-router";
 import { WebView } from "react-native-webview";
 
-// ─── GANTI INI KALAU LINKNYA SUDAH ADA ────────────────────────────────────────
+// ─── GANTI INI KALAU LINKNYA SUDAH ADA ───────────────────────────
 const INVENTARIS_URL = ""; // contoh: "https://inventaris.sitpermata.id/"
-// ──────────────────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────
 
-const C = { bg:"#fff", text:"#0f172a", sub:"#475569", border:"#e5e7eb", brand:"#0ea5a3" };
+const C = {
+  brand: "#42909b",
+  bg: "#fff",
+  text: "#0f172a",
+  sub: "#475569",
+  border: "#e5e7eb",
+};
 
 export default function InventarisScreen() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const webref = useRef<any>(null);
 
-  // Kalau di web & URL tersedia: buka tab baru (beberapa situs block iframe)
+  // Kalau di web & URL tersedia: buka tab baru
   useEffect(() => {
     if (Platform.OS === "web" && INVENTARIS_URL) {
       try { window.open(INVENTARIS_URL, "_blank", "noopener,noreferrer"); } catch {}
@@ -35,36 +40,32 @@ export default function InventarisScreen() {
   };
 
   const renderContent = () => {
-    // Belum ada link → placeholder
     if (!INVENTARIS_URL) {
       return (
         <View style={s.centerBox}>
           <Ionicons name="cube-outline" size={40} color={C.brand} />
           <Text style={s.centerTitle}>Fitur Inventaris</Text>
           <Text style={s.centerSub}>Fitur inventaris akan segera hadir.</Text>
-          <TouchableOpacity disabled style={[s.btn, { opacity: 0.5 }]}>
-            <Text style={s.btnText}>Buka Inventaris</Text>
+          <TouchableOpacity disabled style={[s.btnPrimary, { opacity: 0.5 }]}>
+            <Text style={s.btnPrimaryText}>Buka Inventaris</Text>
           </TouchableOpacity>
         </View>
       );
     }
 
-    // Ada link → Web/native
     if (Platform.OS === "web") {
-      // Di web kita sudah membuka tab baru via useEffect; tampilkan tombol ulang
       return (
         <View style={s.centerBox}>
           <Text style={{ color: C.sub, textAlign: "center", marginBottom: 10 }}>
             Inventaris dibuka di tab baru.
           </Text>
-          <TouchableOpacity onPress={openExternal} style={s.btn}>
-            <Text style={s.btnText}>Buka Lagi</Text>
+          <TouchableOpacity onPress={openExternal} style={s.btnPrimary}>
+            <Text style={s.btnPrimaryText}>Buka Lagi</Text>
           </TouchableOpacity>
         </View>
       );
     }
 
-    // Native (Android/iOS) → WebView
     return (
       <>
         <WebView
@@ -91,11 +92,11 @@ export default function InventarisScreen() {
           <View style={s.errorBox}>
             <Text style={{ color: "red", marginBottom: 8 }}>{err}</Text>
             <View style={{ flexDirection: "row", gap: 10 }}>
-              <TouchableOpacity onPress={() => webref.current?.reload()} style={[s.btn, { backgroundColor: C.brand }]}>
-                <Text style={s.btnText}>Muat Ulang</Text>
+              <TouchableOpacity onPress={() => webref.current?.reload()} style={s.btnPrimary}>
+                <Text style={s.btnPrimaryText}>Muat Ulang</Text>
               </TouchableOpacity>
               <TouchableOpacity onPress={openExternal} style={s.btnGhost}>
-                <Text style={{ color: C.brand, fontWeight: "700" }}>Buka di Browser</Text>
+                <Text style={s.btnGhostText}>Buka di Browser</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -104,39 +105,80 @@ export default function InventarisScreen() {
     );
   };
 
-  return (
-    <View style={s.container}>
-      {/* Header */}
-      <View style={s.header}>
-        <TouchableOpacity onPress={() => router.back()} style={{ marginRight: 12 }}>
-          <Ionicons name="arrow-back" size={22} color={C.text} />
-        </TouchableOpacity>
-        <Text style={s.title}>Inventaris</Text>
-        <View style={{ width: 22 }} />
-      </View>
-
-      <View style={{ flex: 1 }}>{renderContent()}</View>
+  const Header = (
+    <View style={s.header}>
+      <TouchableOpacity onPress={() => router.back()} activeOpacity={0.85} style={s.backBtn}>
+        <Ionicons name="chevron-back" size={22} color="#000" />
+      </TouchableOpacity>
+      <Text style={s.title}>Inventaris</Text>
+      <View style={{ width: 38 }} />
     </View>
+  );
+
+  return (
+    <SafeAreaView style={s.container}>
+      <Stack.Screen options={{ headerShown: false }} />
+      {Header}
+      <View style={{ flex: 1 }}>{renderContent()}</View>
+    </SafeAreaView>
   );
 }
 
 const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: C.bg },
-  header: {
-    flexDirection: "row", alignItems: "center",
-    paddingHorizontal: 16, paddingVertical: 12,
-    borderBottomWidth: 1, borderBottomColor: C.border,
-  },
-  title: { fontSize: 16, fontWeight: "700", color: C.text },
 
+  // Header seragam
+  header: {
+    backgroundColor: C.brand,
+    paddingHorizontal: 12,
+    paddingBottom: 12,
+    paddingTop: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  backBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.85)",
+  },
+  title: {
+    flex: 1,
+    textAlign: "center",
+    color: "#fff",
+    fontSize: 18,
+    fontWeight: "800",
+    letterSpacing: 0.3,
+  },
+
+  // Content placeholder
   centerBox: { flex: 1, alignItems: "center", justifyContent: "center", padding: 16, gap: 10 },
   centerTitle: { fontSize: 16, fontWeight: "700", color: C.text, marginTop: 6 },
   centerSub: { color: C.sub, textAlign: "center", marginBottom: 6 },
 
-  btn: { backgroundColor: C.brand, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 10 },
-  btnText: { color: "#fff", fontWeight: "700" },
-  btnGhost: { paddingHorizontal: 14, paddingVertical: 10, borderRadius: 10, borderWidth: 1, borderColor: C.brand },
+  // Buttons
+  btnPrimary: {
+    backgroundColor: C.brand,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 10,
+    alignItems: "center",
+  },
+  btnPrimaryText: { color: "#000", fontWeight: "700" },
+  btnGhost: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: C.brand,
+    alignItems: "center",
+  },
+  btnGhostText: { color: C.brand, fontWeight: "700" },
 
+  // Loading & Error
   overlay: {
     ...StyleSheet.absoluteFillObject,
     alignItems: "center", justifyContent: "center",
