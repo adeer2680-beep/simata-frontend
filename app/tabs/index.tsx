@@ -1,6 +1,6 @@
 // app/index.tsx
 import { Entypo, Feather, Ionicons, MaterialIcons } from "@expo/vector-icons";
-import { Link, type Href } from "expo-router";
+import { Link, type Href, router } from "expo-router"; 
 import React, { useEffect, useMemo, useState } from "react";
 import {
   FlatList,
@@ -13,8 +13,9 @@ import {
   View,
   Platform,
   ActivityIndicator,
+  Alert,
 } from "react-native";
-import AsyncStorage from "@react-native-async-storage/async-storage"; // NEW ✅
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 const COLORS = {
   brand: "#42909b",
@@ -35,7 +36,6 @@ const SHADOW = Platform.select({
 
 // ====== PRAYER API (MyQuran) CONFIG ======
 const MYQURAN_BASE = "https://api.myquran.com/v2/sholat";
-// Ubah sesuai kota kamu: "Bogor", "Jakarta", "Banjarmasin", dsb.
 const CITY_KEYWORD = "Mojokerto";
 
 type Item = {
@@ -61,16 +61,14 @@ const ITEMS: Item[] = [
 ];
 
 // ====== Icon switcher ======
-function IconSwitch({
-  name, lib, size = 26, color = COLORS.text,
-}: { name: string; lib?: Item["lib"]; size?: number; color?: string }) {
+function IconSwitch({ name, lib, size = 26, color = COLORS.text }: { name: string; lib?: Item["lib"]; size?: number; color?: string }) {
   if (lib === "mi")  return <MaterialIcons name={name as any} size={size} color={color} />;
   if (lib === "fe")  return <Feather        name={name as any} size={size} color={color} />;
   if (lib === "ent") return <Entypo         name={name as any} size={size} color={color} />;
   return <Ionicons name={name as any} size={size} color={color} />;
 }
 
-// ====== Header clock dipisah agar tick per detik tidak ganggu komponen lain ======
+// ====== Header clock (kode lama tetap) ======
 function HeaderClock() {
   const [now, setNow] = useState<Date>(new Date());
   useEffect(() => {
@@ -112,26 +110,42 @@ function HeaderClock() {
   );
 }
 
-// ====== Shortcut card ======
-function ShortcutCard({
-  title,
-  subtitle,
-  icon,
-  href,
-}: {
-  title: string;
-  subtitle: string;
-  icon: React.ReactNode;
-  href: Href;
-}) {
+// ====== Tombol Logout kecil pojok kanan atas ======
+function LogoutButton() {
+  const handleLogout = async () => {
+    try {
+      await AsyncStorage.multiRemove(["auth.user", "auth.token"]);
+      router.replace("/login");
+    } catch (error) {
+      Alert.alert("Error", "Gagal logout. Silakan coba lagi.");
+    }
+  };
+
+  return (
+    <TouchableOpacity
+      onPress={handleLogout}
+      style={{
+        position: "absolute",
+        top: 18,
+        right: 16,  // ✅ dipindah ke kanan
+        backgroundColor: COLORS.brand,
+        borderRadius: 20,
+        padding: 6,
+      }}
+    >
+      <Ionicons name="log-out-outline" size={18} color="#fff" />
+    </TouchableOpacity>
+  );
+}
+
+// ====== Shortcut card (tetap) ======
+function ShortcutCard({ title, subtitle, icon, href }: { title: string; subtitle: string; icon: React.ReactNode; href: Href }) {
   const Card = (
     <View style={[styles.shortcutCard, SHADOW]}>
       <View style={styles.shortcutIcon}>{icon}</View>
       <View style={{ flex: 1 }}>
         <Text style={styles.shortcutTitle}>{title}</Text>
-        <Text style={styles.shortcutSub} numberOfLines={1}>
-          {subtitle}
-        </Text>
+        <Text style={styles.shortcutSub} numberOfLines={1}>{subtitle}</Text>
       </View>
       <Ionicons name="chevron-forward" size={18} color={COLORS.sub} />
     </View>
@@ -143,23 +157,18 @@ function ShortcutCard({
   );
 }
 
-// ====== PRAYER HOOK (fetch dari MyQuran) — hanya ketika ganti hari ======
+// ====== PRAYER HOOK (tetap) ======
 type PrayerRow = { name: string; time: string };
 function pad2(n: number) { return String(n).padStart(2, "0"); }
-
 function usePrayers(cityKeyword: string) {
   const [prayers, setPrayers] = useState<PrayerRow[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [cityLabel, setCityLabel] = useState<string>(cityKeyword);
   const [error, setError] = useState<string | null>(null);
-
-  // kunci hari (YYYY-MM-DD) → berubah sekali per hari
   const [dateKey, setDateKey] = useState<string>(() => {
     const d = new Date();
     return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
   });
-
-  // update dateKey tiap tengah malam lokal tanpa render per detik
   useEffect(() => {
     const now = new Date();
     const msToMidnight =
@@ -177,27 +186,17 @@ function usePrayers(cityKeyword: string) {
       try {
         setLoading(true);
         setError(null);
-
-        // 1) Cari ID kota
         const kotaRes = await fetch(`${MYQURAN_BASE}/kota/cari/${encodeURIComponent(cityKeyword)}`);
         const kotaJson = await kotaRes.json();
         const first = kotaJson?.data?.[0];
         if (!first?.id) throw new Error("Kota tidak ditemukan");
-
         const id = String(first.id);
         setCityLabel(first.lokasi || first.nama || cityKeyword);
-
-        // 2) Ambil jadwal HARI INI (berdasarkan dateKey)
         const [yyyy, mm, dd] = dateKey.split("-");
         const jadwalRes = await fetch(`${MYQURAN_BASE}/jadwal/${id}/${yyyy}/${mm}/${dd}`);
         const jadwalJson = await jadwalRes.json();
         const j = jadwalJson?.data?.jadwal ?? jadwalJson?.data;
-
-        const pick = (obj: any, ...keys: string[]) => {
-          for (const k of keys) if (obj?.[k] != null) return obj[k];
-          return undefined;
-        };
-
+        const pick = (obj: any, ...keys: string[]) => { for (const k of keys) if (obj?.[k] != null) return obj[k]; return undefined; };
         const rows: PrayerRow[] = [
           { name: "Subuh",   time: pick(j, "subuh", "Subuh", "Fajr")        ?? "-" },
           { name: "Dzuhur",  time: pick(j, "dzuhur", "Dzuhur", "Dhuhr")     ?? "-" },
@@ -205,7 +204,6 @@ function usePrayers(cityKeyword: string) {
           { name: "Maghrib", time: pick(j, "maghrib", "Maghrib", "Maghrib") ?? "-" },
           { name: "Isya",    time: pick(j, "isya", "Isya", "Isha")          ?? "-" },
         ];
-
         if (!cancelled) setPrayers(rows);
       } catch (e: any) {
         if (!cancelled) {
@@ -229,53 +227,38 @@ function usePrayers(cityKeyword: string) {
   return { prayers, loading, error, cityLabel };
 }
 
+// ====== BERANDA ======
 export default function Beranda() {
   const { width } = useWindowDimensions();
   const numColumns = width < 400 ? 3 : width < 768 ? 4 : 6;
-
-  // Jadwal shalat (fetch 1x per hari)
   const { prayers, loading: prayerLoading, error: prayerError, cityLabel } = usePrayers(CITY_KEYWORD);
-
-  // ====== NEW: Ambil nama & unit dari AsyncStorage untuk ditampilkan di beranda ======
-  const [welcome, setWelcome] = useState<string>("");  // "Nama • Unit"
+  const [welcome, setWelcome] = useState<string>("");
   useEffect(() => {
     const loadWelcome = async () => {
-      // 1) Prioritas: auth.beranda (string siap tampil)
       const s = await AsyncStorage.getItem("auth.beranda");
-      if (s && s.trim()) {
-        setWelcome(s.trim());
-        return;
-      }
-      // 2) Fallback: auth.user (objek) → bentuk string "nama • unit"
+      if (s && s.trim()) { setWelcome(s.trim()); return; }
       const rawUser = await AsyncStorage.getItem("auth.user");
       if (rawUser) {
         try {
           const u = JSON.parse(rawUser);
           const pieces = [u?.nama, u?.unit].filter(Boolean);
           if (pieces.length > 0) setWelcome(pieces.join(" • "));
-        } catch {
-          // ignore JSON parse error
-        }
+        } catch {}
       }
     };
     loadWelcome();
   }, []);
-  // ====== END NEW ======
 
   const renderItem = ({ item }: ListRenderItemInfo<Item>) => {
     const Card = (
       <View style={[styles.card, SHADOW]}>
-        <View style={styles.cardIconWrap}>
-          <IconSwitch name={item.icon} lib={item.lib} />
-        </View>
+        <View style={styles.cardIconWrap}><IconSwitch name={item.icon} lib={item.lib} /></View>
         <Text style={styles.cardLabel}>{item.label}</Text>
       </View>
     );
     return item.href ? (
       <Link href={item.href} asChild>
-        <TouchableOpacity activeOpacity={0.8} style={styles.cardTouchable}>
-          {Card}
-        </TouchableOpacity>
+        <TouchableOpacity activeOpacity={0.8} style={styles.cardTouchable}>{Card}</TouchableOpacity>
       </Link>
     ) : (
       <View style={styles.cardTouchable}>{Card}</View>
@@ -284,16 +267,13 @@ export default function Beranda() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: COLORS.bg }}>
-      {/* HEADER (terpisah supaya tick 1 detik tidak ganggu layout) */}
       <HeaderClock />
+      <LogoutButton />   {/* ✅ Logout kecil pojok kanan atas */}
 
-      {/* NEW: WELCOME STRIP (nama • unit) */}
       {welcome ? (
         <View style={[styles.welcomeWrap, SHADOW]}>
           <Ionicons name="person-circle-outline" size={18} color={COLORS.brand} />
-          <Text style={styles.welcomeText} numberOfLines={1}>
-            Selamat datang, {welcome}
-          </Text>
+          <Text style={styles.welcomeText} numberOfLines={1}>Selamat datang, {welcome}</Text>
         </View>
       ) : null}
 
@@ -303,16 +283,11 @@ export default function Beranda() {
           <Text style={styles.sectionTitle}>Jadwal Sholat Hari Ini (WIB)</Text>
           <Text style={styles.cityText}>{cityLabel}</Text>
         </View>
-
         {prayerLoading ? (
-          <View style={{ paddingVertical: 10 }}>
-            <ActivityIndicator />
-          </View>
+          <View style={{ paddingVertical: 10 }}><ActivityIndicator /></View>
         ) : (
           <>
-            {!!prayerError && (
-              <Text style={styles.errorText}>Gagal memuat jadwal: {prayerError}</Text>
-            )}
+            {!!prayerError && <Text style={styles.errorText}>Gagal memuat jadwal: {prayerError}</Text>}
             <View style={styles.chipsRow}>
               {(prayers ?? []).map((p) => (
                 <View key={p.name} style={[styles.chip, SHADOW]}>
@@ -325,7 +300,7 @@ export default function Beranda() {
         )}
       </View>
 
-      {/* GRID + FOOTER SHORTCUTS */}
+      {/* GRID */}
       <Text style={styles.gridHeading}>Menu Utama</Text>
       <FlatList
         data={ITEMS}
@@ -368,20 +343,7 @@ const styles = StyleSheet.create({
   dateText: { marginTop: 2, fontSize: 13, color: "#f3f4f6", fontWeight: "600" },
 
   // NEW: WELCOME
-  welcomeWrap: {
-    marginTop: -10,
-    marginHorizontal: 12,
-    marginBottom: 8,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    backgroundColor: "#ffffff",
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
+  welcomeWrap: { marginTop: -10, marginHorizontal: 12, marginBottom: 8, paddingVertical: 10, paddingHorizontal: 12, backgroundColor: "#ffffff", borderRadius: 14, borderWidth: 1, borderColor: COLORS.border, flexDirection: "row", alignItems: "center", gap: 8 },
   welcomeText: { fontSize: 13, color: COLORS.text, fontWeight: "700", flex: 1 },
 
   // PRAYER
@@ -398,13 +360,13 @@ const styles = StyleSheet.create({
   gridHeading: { marginTop: 12, marginBottom: 8, marginHorizontal: 12, fontSize: 14, color: COLORS.sub, fontWeight: "700" },
   cardTouchable: { flex: 1 },
   card: { backgroundColor: COLORS.card, borderRadius: 16, height: 92, alignItems: "center", justifyContent: "center", gap: 10, paddingHorizontal: 8, borderWidth: 1, borderColor: COLORS.border },
-  cardIconWrap: { width: 40, height: 40, borderRadius: 14, alignItems: "center", justifyContent: "center", backgroundColor: "#ffffff", borderWidth: 1, borderColor: COLORS.border },
-  cardLabel: { fontSize: 13, color: COLORS.text, fontWeight: "700", textAlign: "center" },
+  cardIconWrap: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center", backgroundColor: COLORS.soft },
+  cardLabel: { fontSize: 12, fontWeight: "600", color: COLORS.text, textAlign: "center" },
 
-  // SHORTCUTS (footer)
-  shortcutsWrap: { gap: 10, marginHorizontal: 12 },
-  shortcutCard: { flexDirection: "row", alignItems: "center", backgroundColor: COLORS.card, padding: 14, borderRadius: 14, borderWidth: 1, borderColor: COLORS.border, gap: 12 },
-  shortcutIcon: { width: 38, height: 38, borderRadius: 12, backgroundColor: COLORS.soft, alignItems: "center", justifyContent: "center" },
-  shortcutTitle: { fontSize: 15, fontWeight: "800", color: COLORS.text },
+  // SHORTCUT
+  shortcutsWrap: { marginTop: 4, gap: 12 },
+  shortcutCard: { flexDirection: "row", alignItems: "center", backgroundColor: "#ffffff", padding: 12, borderRadius: 14, borderWidth: 1, borderColor: COLORS.border },
+  shortcutIcon: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center", backgroundColor: COLORS.soft, marginRight: 10 },
+  shortcutTitle: { fontSize: 14, fontWeight: "700", color: COLORS.text },
   shortcutSub: { fontSize: 12, color: COLORS.sub, marginTop: 2 },
 });

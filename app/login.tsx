@@ -110,8 +110,8 @@ const handleLogin = async () => {
     });
 
     // Arahkan ke Dashboard (pakai push; jika tetap bandel, coba navigate/replace)
-    console.log("➡️ ARAHKAN ROUTE KE: /(tabs)/dashboard");
-    router.push("/tabs/dashboard");
+    console.log("➡️ ARAHKAN ROUTE KE: /tabs");
+    router.push("/tabs");
 
     // Opsional: beri notifikasi
     // Alert.alert("Berhasil", `Selamat datang ${displayName}`);
