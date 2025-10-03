@@ -14,6 +14,7 @@ import {
   Platform,
   ActivityIndicator,
 } from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage"; // NEW ✅
 
 const COLORS = {
   brand: "#42909b",
@@ -52,7 +53,7 @@ const ITEMS: Item[] = [
   { label: "Laporan",    icon: "document-text-outline",  lib: "ion", href: "/laporan" },
   { label: "Siswa",      icon: "people-outline",         lib: "ion", href: "/siswa" },
   { label: "Inventaris", icon: "box",                    lib: "fe",  href: "/inventaris" },
-  { label: "Berita",     icon: "newspaper-outline",      lib: "ion", href: "/berita" },
+  { label: "Berita",     icon: "newspaper-outline",      lib: "ion", href: "/tabs/berita" },
   { label: "Video",      icon: "play-circle-outline",    lib: "ion", href: "/video" },
   { label: "Al-Qur'an",  icon: "book-outline",           lib: "ion", href: "/surah" },
   { label: "Doa Harian", icon: "leaf-outline",           lib: "ion", href: "/doa" },
@@ -235,6 +236,32 @@ export default function Beranda() {
   // Jadwal shalat (fetch 1x per hari)
   const { prayers, loading: prayerLoading, error: prayerError, cityLabel } = usePrayers(CITY_KEYWORD);
 
+  // ====== NEW: Ambil nama & unit dari AsyncStorage untuk ditampilkan di beranda ======
+  const [welcome, setWelcome] = useState<string>("");  // "Nama • Unit"
+  useEffect(() => {
+    const loadWelcome = async () => {
+      // 1) Prioritas: auth.beranda (string siap tampil)
+      const s = await AsyncStorage.getItem("auth.beranda");
+      if (s && s.trim()) {
+        setWelcome(s.trim());
+        return;
+      }
+      // 2) Fallback: auth.user (objek) → bentuk string "nama • unit"
+      const rawUser = await AsyncStorage.getItem("auth.user");
+      if (rawUser) {
+        try {
+          const u = JSON.parse(rawUser);
+          const pieces = [u?.nama, u?.unit].filter(Boolean);
+          if (pieces.length > 0) setWelcome(pieces.join(" • "));
+        } catch {
+          // ignore JSON parse error
+        }
+      }
+    };
+    loadWelcome();
+  }, []);
+  // ====== END NEW ======
+
   const renderItem = ({ item }: ListRenderItemInfo<Item>) => {
     const Card = (
       <View style={[styles.card, SHADOW]}>
@@ -259,6 +286,16 @@ export default function Beranda() {
     <SafeAreaView style={{ flex: 1, backgroundColor: COLORS.bg }}>
       {/* HEADER (terpisah supaya tick 1 detik tidak ganggu layout) */}
       <HeaderClock />
+
+      {/* NEW: WELCOME STRIP (nama • unit) */}
+      {welcome ? (
+        <View style={[styles.welcomeWrap, SHADOW]}>
+          <Ionicons name="person-circle-outline" size={18} color={COLORS.brand} />
+          <Text style={styles.welcomeText} numberOfLines={1}>
+            Selamat datang, {welcome}
+          </Text>
+        </View>
+      ) : null}
 
       {/* JADWAL SHOLAT */}
       <View style={[styles.prayerWrap, SHADOW]}>
@@ -304,7 +341,7 @@ export default function Beranda() {
               <ShortcutCard
                 title="Berita"
                 subtitle="Tekan untuk melihat semua berita"
-                href={"/berita"}
+                href={"/tabs/berita"}
                 icon={<Ionicons name="newspaper" size={22} color={COLORS.brand} />}
               />
               <ShortcutCard
@@ -330,8 +367,25 @@ const styles = StyleSheet.create({
   clockText: { fontSize: 16, fontWeight: "700", color: "#ffffff" },
   dateText: { marginTop: 2, fontSize: 13, color: "#f3f4f6", fontWeight: "600" },
 
+  // NEW: WELCOME
+  welcomeWrap: {
+    marginTop: -10,
+    marginHorizontal: 12,
+    marginBottom: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    backgroundColor: "#ffffff",
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  welcomeText: { fontSize: 13, color: COLORS.text, fontWeight: "700", flex: 1 },
+
   // PRAYER
-  prayerWrap: { backgroundColor: COLORS.softBlue, marginHorizontal: 12, padding: 12, borderRadius: 16, marginTop: -14, borderWidth: 1, borderColor: COLORS.border },
+  prayerWrap: { backgroundColor: COLORS.softBlue, marginHorizontal: 12, padding: 12, borderRadius: 16, marginTop: -4, borderWidth: 1, borderColor: COLORS.border },
   sectionTitle: { fontSize: 16, fontWeight: "700", color: COLORS.text },
   cityText: { fontSize: 12, color: COLORS.sub, fontWeight: "700" },
   errorText: { color: "#b91c1c", marginBottom: 6, fontSize: 12 },

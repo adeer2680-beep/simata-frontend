@@ -7,9 +7,12 @@ import { Ionicons } from "@expo/vector-icons";
 import { router, Stack } from "expo-router";
 import { WebView } from "react-native-webview";
 
-// ─── GANTI INI KALAU LINKNYA SUDAH ADA ───────────────────────────
-const INVENTARIS_URL = ""; // contoh: "https://inventaris.sitpermata.id/"
-// ────────────────────────────────────────────────────────────────
+// 👉 GANTI INI dengan alamat backend Laravel kamu
+const INVENTARIS_URL =
+  Platform.OS === "android"
+    ? "http://10.0.2.2:8000/inventaris" // emulator Android
+    : "http://localhost:8000/inventaris"; // dev lokal
+// contoh online: "https://inventaris.sitpermata.id/inventaris"
 
 const C = {
   brand: "#42909b",
@@ -24,7 +27,6 @@ export default function InventarisScreen() {
   const [err, setErr] = useState<string | null>(null);
   const webref = useRef<any>(null);
 
-  // Kalau di web & URL tersedia: buka tab baru
   useEffect(() => {
     if (Platform.OS === "web" && INVENTARIS_URL) {
       try { window.open(INVENTARIS_URL, "_blank", "noopener,noreferrer"); } catch {}
@@ -154,12 +156,10 @@ const s = StyleSheet.create({
     letterSpacing: 0.3,
   },
 
-  // Content placeholder
   centerBox: { flex: 1, alignItems: "center", justifyContent: "center", padding: 16, gap: 10 },
   centerTitle: { fontSize: 16, fontWeight: "700", color: C.text, marginTop: 6 },
   centerSub: { color: C.sub, textAlign: "center", marginBottom: 6 },
 
-  // Buttons
   btnPrimary: {
     backgroundColor: C.brand,
     paddingHorizontal: 14,
@@ -178,7 +178,6 @@ const s = StyleSheet.create({
   },
   btnGhostText: { color: C.brand, fontWeight: "700" },
 
-  // Loading & Error
   overlay: {
     ...StyleSheet.absoluteFillObject,
     alignItems: "center", justifyContent: "center",

@@ -8,8 +8,6 @@ import {
   ScrollView,
   ActivityIndicator,
   SafeAreaView,
-  TextInput,
-  Alert,
   Platform,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
@@ -24,7 +22,7 @@ const C = {
   sub: "#475569",
   border: "#e5e7eb",
   soft: "#f8fafc",
-  pill: "#f3f4f6",       // ✅ ditambahkan agar tidak error
+  pill: "#f3f4f6",
   holiday: "#dc2626",
   sunday: "#dc2626",
 };
@@ -49,20 +47,63 @@ function ymdLocal(d: Date) {
   const day = d.getDate();
   return `${y}-${m < 10 ? "0" + m : m}-${day < 10 ? "0" + day : day}`;
 }
+function toISODateOnly(raw: any): string | null {
+  if (!raw && raw !== 0) return null;
+
+  if (raw instanceof Date) return ymdLocal(raw);
+  if (typeof raw === "number") return ymdLocal(new Date(raw));
+
+  if (typeof raw === "string") {
+    const s = raw.trim();
+
+    // YYYY-MM-DD / YYYY-MM-DDTHH:mm:ss
+    const mIso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (mIso) return `${mIso[1]}-${mIso[2]}-${mIso[3]}`;
+
+    // YYYY/MM/DD
+    const mSlashY = s.match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})$/);
+    if (mSlashY) {
+      const y = mSlashY[1];
+      const m = mSlashY[2].padStart(2, "0");
+      const d = mSlashY[3].padStart(2, "0");
+      return `${y}-${m}-${d}`;
+    }
+
+    // DD-MM-YYYY atau DD/MM/YYYY
+    const mDmy = s.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/);
+    if (mDmy) {
+      const d = mDmy[1].padStart(2, "0");
+      const m = mDmy[2].padStart(2, "0");
+      const y = mDmy[3];
+      return `${y}-${m}-${d}`;
+    }
+
+    // YYYY-MM-DD HH:mm:ss
+    const mSql = s.match(/^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2}):(\d{2})$/);
+    if (mSql) return `${mSql[1]}-${mSql[2]}-${mSql[3]}`;
+  }
+
+  return null;
+}
+function parseAsDateAtLocalMidnight(isoDate: string | null): Date | null {
+  if (!isoDate) return null;
+  const d = new Date(`${isoDate}T00:00:00`);
+  return isNaN(d.getTime()) ? null : d;
+}
 
 // ============ API CONFIG ============
 const API_BASE =
-  Platform.OS === "android"
-    ? "http://10.0.2.2:8000/api" // emulator Android
-    : "http://localhost:8000/api"; // web/iOS simulator
+  Platform.OS === "android" ? "http://10.0.2.2:8000/api" : "http://localhost:8000/api";
 
 const KALENDER_URL = `${API_BASE}/kalender-akademik`;
 
 // Bentuk data yang dipakai UI
-type CalEvent = { id?: number; date: string; title: string };
-
-// ADMIN toggle (sementara hardcode; nanti ganti sesuai role login)
-const IS_ADMIN = true;
+type CalEvent = {
+  id?: number;
+  title: string;
+  startDate: string; // YYYY-MM-DD
+  endDate?: string | null; // YYYY-MM-DD | null
+};
 
 // Loader bulan tertentu
 async function fetchMonthEvents(year: number, monthIndex0: number) {
@@ -71,13 +112,28 @@ async function fetchMonthEvents(year: number, monthIndex0: number) {
 
   try {
     const { data } = await axios.get(url, { timeout: 15000 });
-    // Normalisasi bentuk data agar fleksibel
     const list = (data?.data ?? data ?? []) as any[];
-    return list.map((it) => ({
-      id: it.id ?? it.ID ?? it.event_id,
-      date: it.date ?? it.tanggal ?? it.tgl,
-      title: it.title ?? it.nama ?? it.kegiatan,
-    })) as CalEvent[];
+
+    return list.map((it) => {
+      const startISO =
+        toISODateOnly(it.tanggal_mulai) ??
+        toISODateOnly(it.startDate) ??
+        toISODateOnly(it.date) ??
+        toISODateOnly(it.tanggal) ??
+        toISODateOnly(it.tgl);
+
+      const endISO =
+        toISODateOnly(it.tanggal_selesai) ??
+        toISODateOnly(it.endDate) ??
+        null;
+
+      return {
+        id: it.id ?? it.ID ?? it.event_id,
+        title: it.judul ?? it.title ?? it.nama ?? it.kegiatan ?? "(Tanpa judul)",
+        startDate: startISO ?? "", // wajib
+        endDate: endISO, // bisa null
+      } as CalEvent;
+    }).filter((e) => e.startDate); // buang yang tidak punya tanggal mulai
   } catch (err: any) {
     const status = err?.response?.status;
     const payload = err?.response?.data;
@@ -88,21 +144,30 @@ async function fetchMonthEvents(year: number, monthIndex0: number) {
   }
 }
 
-// CRUD helpers
-async function createEvent(ev: CalEvent) {
-  const { data } = await axios.post(KALENDER_URL, ev, { timeout: 15000 });
-  return data?.data ?? data;
-}
-async function updateEvent(id: number, ev: CalEvent) {
-  const { data } = await axios.put(`${KALENDER_URL}/${id}`, ev, { timeout: 15000 });
-  return data?.data ?? data;
-}
-async function deleteEvent(id: number) {
-  await axios.delete(`${KALENDER_URL}/${id}`, { timeout: 15000 });
+// Buat map tanggal->true untuk highlight di bulan yang sedang ditampilkan
+function buildHighlightSet(events: CalEvent[], monthStart: Date, monthEnd: Date) {
+  const set = new Set<string>();
+  for (const ev of events) {
+    const s = parseAsDateAtLocalMidnight(ev.startDate);
+    const e = parseAsDateAtLocalMidnight(ev.endDate ?? ev.startDate);
+    if (!s || !e) continue;
+
+    // Ambil irisan dengan bulan aktif
+    const start = s < monthStart ? monthStart : s;
+    const end = e > monthEnd ? monthEnd : e;
+
+    // Loop per hari (jumlah hari/bulan kecil, aman)
+    const cur = new Date(start);
+    while (cur <= end) {
+      set.add(ymdLocal(cur));
+      cur.setDate(cur.getDate() + 1);
+    }
+  }
+  return set;
 }
 
 // ============ HOOK GRID ============
-function useCalendar(cursor: Date, holidays: CalEvent[]) {
+function useCalendar(cursor: Date, events: CalEvent[]) {
   return useMemo(() => {
     const year = cursor.getFullYear();
     const month = cursor.getMonth();
@@ -115,7 +180,7 @@ function useCalendar(cursor: Date, holidays: CalEvent[]) {
     const totalCells = Math.ceil((leading + daysInMonth) / 7) * 7;
 
     const start = new Date(year, month, 1 - leading);
-    const holidayMap = new Map(holidays.map((h) => [h.date, h.title]));
+    const highlightSet = buildHighlightSet(events, first, last);
 
     const cells = Array.from({ length: totalCells }, (_, i) => {
       const d = new Date(start);
@@ -126,72 +191,12 @@ function useCalendar(cursor: Date, holidays: CalEvent[]) {
         date: d,
         inMonth: d.getMonth() === month,
         isSunday: d.getDay() === 0,
-        holidayTitle: holidayMap.get(iso),
+        isHoliday: highlightSet.has(iso),
       };
     });
 
     return { cells, title: titleId(cursor) };
-  }, [cursor, holidays]);
-}
-
-// ============ FORM KECIL (Tambah/Edit) ============
-function EventForm({
-  value,
-  onCancel,
-  onSubmit,
-  busy,
-}: {
-  value: CalEvent;
-  onCancel: () => void;
-  onSubmit: (v: CalEvent) => void;
-  busy: boolean;
-}) {
-  const [local, setLocal] = useState<CalEvent>(value);
-
-  useEffect(() => setLocal(value), [value]);
-
-  return (
-    <View style={s.formBox}>
-      <Text style={s.formTitle}>{value?.id ? "Edit Kegiatan" : "Tambah Kegiatan"}</Text>
-
-      <Text style={s.label}>Tanggal (YYYY-MM-DD)</Text>
-      <TextInput
-        placeholder="2025-10-01"
-        placeholderTextColor={C.sub}
-        value={local.date}
-        onChangeText={(t) => setLocal((p) => ({ ...p, date: t }))}
-        style={s.input}
-      />
-
-      <Text style={[s.label, { marginTop: 10 }]}>Judul</Text>
-      <TextInput
-        placeholder="Ujian Tengah Semester"
-        placeholderTextColor={C.sub}
-        value={local.title}
-        onChangeText={(t) => setLocal((p) => ({ ...p, title: t }))}
-        style={s.input}
-      />
-
-      <View style={{ flexDirection: "row", gap: 8, marginTop: 12 }}>
-        <TouchableOpacity
-          onPress={onCancel}
-          disabled={busy}
-          style={[s.btn, { backgroundColor: C.soft, borderColor: C.border }]}
-        >
-          <Text>Batalkan</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          onPress={() => onSubmit(local)}
-          disabled={busy}
-          style={[s.btn, { backgroundColor: C.brand }]}
-        >
-          <Text style={{ color: "#fff", fontWeight: "700" }}>
-            {busy ? "Menyimpan..." : "Simpan"}
-          </Text>
-        </TouchableOpacity>
-      </View>
-    </View>
-  );
+  }, [cursor, events]);
 }
 
 // ============ MAIN ============
@@ -200,11 +205,7 @@ export default function KalenderPendidikan() {
   const [cursor, setCursor] = useState(new Date(today.getFullYear(), today.getMonth(), 1));
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [remoteHolidays, setRemoteHolidays] = useState<CalEvent[] | null>(null);
-
-  // State Admin
-  const [editing, setEditing] = useState<CalEvent | null>(null);
-  const [submitting, setSubmitting] = useState(false);
+  const [events, setEvents] = useState<CalEvent[] | null>(null);
 
   // Fetch setiap ganti bulan
   useEffect(() => {
@@ -216,10 +217,10 @@ export default function KalenderPendidikan() {
         const y = cursor.getFullYear();
         const m0 = cursor.getMonth();
         const data = await fetchMonthEvents(y, m0);
-        if (!cancelled) setRemoteHolidays(data?.length ? data : []);
+        if (!cancelled) setEvents(data ?? []);
       } catch (e: any) {
         if (!cancelled) {
-          setRemoteHolidays([]);
+          setEvents([]);
           setError(e?.message ?? "Gagal memuat kalender.");
         }
       } finally {
@@ -231,54 +232,14 @@ export default function KalenderPendidikan() {
     };
   }, [cursor]);
 
-  const monthHolidays = remoteHolidays ?? [];
-  const { cells, title } = useCalendar(cursor, monthHolidays);
-
-  // Submit tambah/edit
-  async function submitEvent(val: CalEvent) {
-    try {
-      setSubmitting(true);
-      if (val.id) await updateEvent(val.id, val);
-      else await createEvent(val);
-      // reload bulan sekarang
-      setCursor((d) => new Date(d));
-      setEditing(null);
-    } catch (e: any) {
-      Alert.alert("Gagal", e?.message ?? "Tidak bisa menyimpan.");
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  // Hapus
-  async function removeEvent(id?: number, title?: string) {
-    if (!id) return Alert.alert("Tidak bisa hapus", "Item ini tidak memiliki id.");
-    Alert.alert("Hapus", `Hapus "${title ?? "item"}"?`, [
-      { text: "Batal" },
-      {
-        text: "Hapus",
-        style: "destructive",
-        onPress: async () => {
-          try {
-            await deleteEvent(id);
-            setCursor((d) => new Date(d)); // reload
-          } catch (e: any) {
-            Alert.alert("Gagal", e?.message ?? "Tidak bisa menghapus.");
-          }
-        },
-      },
-    ]);
-  }
+  const monthEvents = events ?? [];
+  const { cells, title } = useCalendar(cursor, monthEvents);
 
   return (
     <SafeAreaView style={s.container}>
       {/* HEADER */}
       <View style={s.header}>
-        <TouchableOpacity
-          onPress={() => router.back()}
-          activeOpacity={0.85}
-          style={s.backBtn}
-        >
+        <TouchableOpacity onPress={() => router.back()} activeOpacity={0.85} style={s.backBtn}>
           <Ionicons name="chevron-back" size={22} color="#000" />
         </TouchableOpacity>
         <Text style={s.headerTitle}>Kalender Pendidikan</Text>
@@ -302,9 +263,7 @@ export default function KalenderPendidikan() {
           <View style={s.weekHeaderRow}>
             {WEEK_DAYS.map((d) => (
               <View key={d} style={s.weekHeaderCell}>
-                <Text style={[s.weekHeaderText, d === "Ahad" && { color: C.sunday }]}>
-                  {d}
-                </Text>
+                <Text style={[s.weekHeaderText, d === "Ahad" && { color: C.sunday }]}>{d}</Text>
               </View>
             ))}
           </View>
@@ -313,7 +272,6 @@ export default function KalenderPendidikan() {
           <View style={s.grid}>
             {cells.map((c) => {
               const day = c.date.getDate();
-              const isHoliday = Boolean(c.holidayTitle);
               return (
                 <View key={c.key} style={s.cell}>
                   <Text
@@ -321,12 +279,12 @@ export default function KalenderPendidikan() {
                       s.dayText,
                       !c.inMonth && { color: "#94a3b8" },
                       c.inMonth && c.isSunday && { color: C.sunday, fontWeight: "700" },
-                      isHoliday && c.inMonth && { color: C.holiday, fontWeight: "800" },
+                      c.isHoliday && c.inMonth && { color: C.holiday, fontWeight: "800" },
                     ]}
                   >
                     {day}
                   </Text>
-                  {isHoliday && c.inMonth && <Text style={s.holidayDot}>●</Text>}
+                  {c.isHoliday && c.inMonth && <Text style={s.holidayDot}>●</Text>}
                 </View>
               );
             })}
@@ -371,81 +329,51 @@ export default function KalenderPendidikan() {
         {/* Daftar Libur & Kegiatan */}
         <View style={s.section}>
           <Text style={s.sectionTitle}>Hari Libur & Kegiatan</Text>
-          {monthHolidays.length === 0 ? (
+          {monthEvents.length === 0 ? (
             <Text style={s.emptyText}>Tidak ada libur/kegiatan bulan ini.</Text>
           ) : (
-            monthHolidays.map((h) => {
-              const d = new Date(h.date);
-              const tgl = d.getDate();
-              const bln = d.toLocaleDateString("id-ID", { month: "short" });
-              const hari = d.toLocaleDateString("id-ID", { weekday: "long" });
+            monthEvents.map((h) => {
+              const sISO = toISODateOnly(h.startDate);
+              const eISO = toISODateOnly(h.endDate ?? h.startDate);
+              const sd = parseAsDateAtLocalMidnight(sISO);
+              const ed = parseAsDateAtLocalMidnight(eISO);
+
+              // Format label tanggal
+              let label = String(h.startDate || "");
+              if (sd && ed) {
+                const sameDay = sd.getTime() === ed.getTime();
+                const tglS = sd.getDate();
+                const blnS = sd.toLocaleDateString("id-ID", { month: "short" });
+                const thS = sd.getFullYear();
+
+                if (sameDay) {
+                  const hari = sd.toLocaleDateString("id-ID", { weekday: "long" });
+                  label = `${hari}, ${tglS} ${blnS} ${thS}`;
+                } else {
+                  const tglE = ed.getDate();
+                  const blnE = ed.toLocaleDateString("id-ID", { month: "short" });
+                  const thE = ed.getFullYear();
+                  label = `${tglS} ${blnS} ${thS} – ${tglE} ${blnE} ${thE}`;
+                }
+              }
+
               return (
-                <View key={(h.id ?? 0) + h.date + h.title} style={s.holidayRow}>
+                <View key={(h.id ?? 0) + h.title + (h.startDate ?? "")} style={s.holidayRow}>
                   <View style={s.holidayDateBox}>
-                    <Text style={s.holidayMon}>{bln}</Text>
-                    <Text style={s.holidayDay}>{tgl}</Text>
+                    <Text style={s.holidayMon}>
+                      {sd ? sd.toLocaleDateString("id-ID", { month: "short" }) : "-"}
+                    </Text>
+                    <Text style={s.holidayDay}>{sd ? sd.getDate() : "-"}</Text>
                   </View>
                   <View style={{ flex: 1 }}>
                     <Text style={s.holidayTitle}>{h.title}</Text>
-                    <Text style={s.holidaySub}>
-                      {hari}, {tgl} {bln} {d.getFullYear()}
-                    </Text>
+                    <Text style={s.holidaySub}>{label}</Text>
                   </View>
-
-                  {/* Tombol Admin per item */}
-                  {IS_ADMIN && (
-                    <View style={{ flexDirection: "row", gap: 8 }}>
-                      <TouchableOpacity
-                        onPress={() => setEditing({ id: h.id, date: h.date, title: h.title })}
-                        style={s.itemBtn}
-                      >
-                        <Text>Edit</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        onPress={() => removeEvent(h.id, h.title)}
-                        style={[s.itemBtn, { backgroundColor: "#fee2e2" }]}
-                      >
-                        <Text style={{ color: "#b91c1c", fontWeight: "700" }}>Hapus</Text>
-                      </TouchableOpacity>
-                    </View>
-                  )}
                 </View>
               );
             })
           )}
         </View>
-
-        {/* Panel Admin (Tambah / Form) */}
-        {IS_ADMIN && (
-          <View style={[s.section, { marginTop: 12 }]}>
-            <Text style={s.sectionTitle}>Admin: Kelola Kegiatan</Text>
-
-            {!editing && (
-              <TouchableOpacity
-                onPress={() => setEditing({ date: ymdLocal(today), title: "" })}
-                style={{
-                  alignSelf: "flex-start",
-                  margin: 12,
-                  paddingVertical: 10,
-                  paddingHorizontal: 14,
-                  borderRadius: 8,
-                  backgroundColor: C.brand,
-                }}
-              >
-                <Text style={{ color: "#fff", fontWeight: "700" }}>Tambah</Text>
-              </TouchableOpacity>
-            )}
-
-            {editing && (
-              <EventForm
-                value={editing}
-                busy={submitting}
-                onCancel={() => setEditing(null)}
-                onSubmit={submitEvent}
-              />
-            )}
-          </View>
-        )}
 
         <View style={{ height: 40 }} />
       </ScrollView>
@@ -553,33 +481,4 @@ const s = StyleSheet.create({
   holidayDay: { color: C.text, fontWeight: "800", fontSize: 18, marginTop: -2 },
   holidayTitle: { color: C.text, fontWeight: "700" },
   holidaySub: { color: C.sub, fontSize: 12, marginTop: 2 },
-
-  // Admin
-  formBox: {
-    marginHorizontal: 12,
-    marginBottom: 12,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: C.border,
-    borderRadius: 12,
-    backgroundColor: "#fff",
-  },
-  formTitle: { fontWeight: "700", marginBottom: 8, color: C.text },
-  label: { color: C.sub, marginBottom: 4, fontSize: 12 },
-  input: {
-    borderWidth: 1,
-    borderColor: C.border,
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    color: C.text,
-    backgroundColor: "#fff",
-  },
-  btn: { paddingVertical: 12, paddingHorizontal: 16, borderRadius: 8 },
-  itemBtn: {
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-    borderRadius: 8,
-    backgroundColor: C.pill,
-  },
 });

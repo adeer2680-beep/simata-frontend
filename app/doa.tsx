@@ -10,9 +10,7 @@ import {
   RefreshControl,
   Platform,
   SafeAreaView,
-  TextInput,
   Alert,
-  ToastAndroid,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
@@ -37,25 +35,13 @@ type DoaItem = {
 const API_BASE =
   Platform.OS === "android" ? "http://10.0.2.2:8000/api" : "http://localhost:8000/api";
 
-const API_LIST = `${API_BASE}/doa`;      // GET daftar doa
-const API_CREATE = `${API_BASE}/doa`;    // POST tambah doa
-// (opsional) detail: `${API_BASE}/doa/{id}`
-
-const IS_ADMIN = true; // ganti ke false bila tidak mau tampilkan form tambah
+const API_LIST = `${API_BASE}/doa`; // GET daftar doa
 
 export default function DoaHarianScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [data, setData] = useState<DoaItem[]>([]);
   const [error, setError] = useState<string | null>(null);
-
-  // state form tambah
-  const [adding, setAdding] = useState(false);
-  const [judul, setJudul] = useState("");
-  const [arab, setArab] = useState("");
-  const [latin, setLatin] = useState("");
-  const [artinya, setArtinya] = useState("");
-  const [submitting, setSubmitting] = useState(false);
 
   const normalizeList = (json: any): DoaItem[] => {
     if (Array.isArray(json)) return json;
@@ -90,68 +76,6 @@ export default function DoaHarianScreen() {
     load();
   }, [load]);
 
-  // submit tambah doa -> POST /api/doa
-  const onSubmitAdd = async () => {
-    if (!judul.trim() || !arab.trim() || !latin.trim() || !artinya.trim()) {
-      Alert.alert("Lengkapi Data", "Semua field wajib diisi.");
-      return;
-    }
-    try {
-      setSubmitting(true);
-      const res = await fetch(API_CREATE, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "application/json",
-          // Authorization: `Bearer ${token}`, // aktifkan jika butuh auth
-        },
-        body: JSON.stringify({
-          judul: judul.trim(),
-          arab: arab.trim(),
-          latin: latin.trim(),
-          artinya: artinya.trim(),
-        }),
-      });
-
-      const text = await res.text();
-      if (!res.ok) {
-        let msg = `HTTP ${res.status}`;
-        try {
-          const j = JSON.parse(text);
-          if (j?.message) msg += ` – ${j.message}`;
-          if (j?.errors) {
-            const first =
-              (Object.values(j.errors) as any[]).flat?.()[0] ?? JSON.stringify(j.errors);
-            if (first) msg += `\n${first}`;
-          }
-        } catch {
-          msg += ` – ${text}`;
-        }
-        throw new Error(msg);
-      }
-
-      // sukses
-      if (Platform.OS === "android") {
-        ToastAndroid.show("Doa berhasil ditambahkan", ToastAndroid.SHORT);
-      } else {
-        Alert.alert("Berhasil", "Doa berhasil ditambahkan");
-      }
-
-      // reset form & tutup panel
-      setJudul(""); setArab(""); setLatin(""); setArtinya("");
-      setAdding(false);
-
-      // refresh list
-      setLoading(true);
-      await load();
-    } catch (e: any) {
-      console.error(e);
-      Alert.alert("Gagal", e?.message ?? "Tidak bisa menambahkan doa.");
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
   const Header = (
     <View style={s.header}>
       <TouchableOpacity onPress={() => router.back()} activeOpacity={0.85} style={s.backBtn}>
@@ -165,80 +89,6 @@ export default function DoaHarianScreen() {
   return (
     <SafeAreaView style={s.container}>
       {Header}
-
-      {/* Panel Tambah (Admin) */}
-      {IS_ADMIN && (
-        <View style={{ padding: 16, paddingBottom: 0 }}>
-          {!adding ? (
-            <TouchableOpacity onPress={() => setAdding(true)} style={s.addBtn}>
-              <Ionicons name="add" size={18} color="#fff" />
-              <Text style={{ color: "#fff", fontWeight: "700", marginLeft: 6 }}>Tambah Doa</Text>
-            </TouchableOpacity>
-          ) : (
-            <View style={s.formBox}>
-              <Text style={s.formTitle}>Tambah Doa</Text>
-
-              <Text style={s.label}>Judul</Text>
-              <TextInput
-                value={judul}
-                onChangeText={setJudul}
-                placeholder="Doa sebelum belajar"
-                placeholderTextColor={COLORS.sub}
-                style={s.input}
-              />
-
-              <Text style={s.label}>Arab</Text>
-              <TextInput
-                value={arab}
-                onChangeText={setArab}
-                placeholder="اَللّٰهُمَّ..."
-                placeholderTextColor={COLORS.sub}
-                style={[s.input, { textAlign: "right" }]}
-                multiline
-              />
-
-              <Text style={s.label}>Latin</Text>
-              <TextInput
-                value={latin}
-                onChangeText={setLatin}
-                placeholder="Allahumma..."
-                placeholderTextColor={COLORS.sub}
-                style={s.input}
-                multiline
-              />
-
-              <Text style={s.label}>Artinya</Text>
-              <TextInput
-                value={artinya}
-                onChangeText={setArtinya}
-                placeholder="Ya Allah, ..."
-                placeholderTextColor={COLORS.sub}
-                style={[s.input, { height: 80, textAlignVertical: "top" }]}
-                multiline
-              />
-
-              <View style={{ flexDirection: "row", gap: 8, marginTop: 12 }}>
-                <TouchableOpacity
-                  onPress={() => { setAdding(false); }}
-                  disabled={submitting}
-                  style={[s.btn, { backgroundColor: COLORS.card }]}
-                >
-                  <Text>Batal</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  onPress={onSubmitAdd}
-                  disabled={submitting}
-                  style={[s.btn, { backgroundColor: COLORS.brand }]}
-                >
-                  <Text style={{ color: "#fff", fontWeight: "700" }}>
-                    {submitting ? "Menyimpan..." : "Simpan"}
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          )}
-        </View>
-      )}
 
       {loading ? (
         <ActivityIndicator style={{ marginTop: 20 }} size="large" color={COLORS.sub} />
@@ -333,38 +183,5 @@ const s = StyleSheet.create({
     paddingVertical: 10,
     borderRadius: 10,
     backgroundColor: COLORS.brand,
-  },
-
-  // Admin add panel
-  addBtn: {
-    alignSelf: "flex-start",
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: COLORS.brand,
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    borderRadius: 10,
-  },
-  formBox: {
-    marginTop: 10,
-    backgroundColor: COLORS.bg,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    borderRadius: 12,
-    padding: 12,
-  },
-  formTitle: { fontWeight: "700", color: COLORS.text, marginBottom: 8 },
-  label: { color: COLORS.sub, marginTop: 8, marginBottom: 4, fontSize: 12 },
-  input: {
-    backgroundColor: COLORS.card,
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    color: COLORS.text,
-  },
-  btn: {
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 10,
   },
 });
