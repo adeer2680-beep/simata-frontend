@@ -58,6 +58,7 @@ const ITEMS: Item[] = [
   { label: "Al-Qur'an",  icon: "book-outline",           lib: "ion", href: "/surah" },
   { label: "Doa Harian", icon: "leaf-outline",           lib: "ion", href: "/doa" },
   { label: "Login",      icon: "log-in-outline",         lib: "ion", href: "/login" },
+  { label: "Register", icon: "person-add-outline", lib: "ion", href: "/register" },
 ];
 
 // ====== Icon switcher ======
