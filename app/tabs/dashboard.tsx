@@ -1,98 +1,151 @@
-// app/(tabs)/dashboard.tsx
-import React, { useEffect, useState } from "react";
-import { View, Text, ActivityIndicator, StyleSheet, TouchableOpacity } from "react-native";
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import { router } from "expo-router";
-import { Ionicons } from "@expo/vector-icons";
+import React, { useState } from "react";
+import { View, Text, StyleSheet, ScrollView, Dimensions } from "react-native";
+import { PieChart } from "react-native-chart-kit";
 
-const C = {
-  brand: "#42909b",
-  text: "#0f172a",
-  sub: "#475569",
-  border: "#e5e7eb",
-  bg: "#ffffff",
-};
+const screenWidth = Dimensions.get("window").width;
 
-type User = { nama?: string; unit?: string; [k: string]: any };
+export default function DashboardGuru() {
+  // Data dummy
+  const [guru] = useState({
+    nama: "Tiara Difa",
+    unit: "FTI",
+  });
 
-export default function Dashboard() {
-  const [checking, setChecking] = useState(true);
-  const [user, setUser] = useState<User | null>(null);
+  const [laporanPresensi] = useState({
+    bulan: "Oktober",
+    tahun: 2025,
+    totalHadir: 18,
+    totalPulang: 18,
+  });
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const token = (await AsyncStorage.getItem("auth.token")) || (await AsyncStorage.getItem("token"));
-        if (!token) {
-          router.replace("/login");
-          return;
-        }
-        const raw = await AsyncStorage.getItem("auth.user");
-        if (raw) {
-          try { setUser(JSON.parse(raw)); } catch { setUser(null); }
-        }
-      } finally {
-        setChecking(false);
-      }
-    })();
-  }, []);
+  const [laporanIzin] = useState({
+    totalIzin: 2,
+  });
 
-  if (checking) {
-    return (
-      <View style={s.center}>
-        <ActivityIndicator />
-        <Text style={{ marginTop: 8, color: C.sub }}>Memeriksa sesi…</Text>
-      </View>
-    );
-  }
+  // Data untuk Pie Chart
+  const data = [
+    {
+      name: "Hadir",
+      jumlah: laporanPresensi.totalHadir,
+      color: "#4CAF50",
+      legendFontColor: "#333",
+      legendFontSize: 14,
+    },
+    {
+      name: "Pulang",
+      jumlah: laporanPresensi.totalPulang,
+      color: "#FFB300",
+      legendFontColor: "#333",
+      legendFontSize: 14,
+    },
+    {
+      name: "Izin",
+      jumlah: laporanIzin.totalIzin,
+      color: "#F44336",
+      legendFontColor: "#333",
+      legendFontSize: 14,
+    },
+  ];
 
   return (
-    <View style={s.container}>
-      <View style={s.header}>
-        <Text style={s.hi}>
-          Selamat datang{user?.nama ? `, ${user.nama}` : ""}{user?.unit ? ` • ${user.unit}` : ""}
+    <ScrollView style={styles.container}>
+      {/* Header */}
+      <View style={styles.header}>
+        <Text style={styles.headerTitle}>Dashboard Guru</Text>
+        <Text style={styles.headerSubtitle}>
+          {guru.nama} - {guru.unit}
         </Text>
-        <Text style={s.sub}>Ini adalah ringkasan singkat akun Anda.</Text>
       </View>
 
-      <View style={s.grid}>
-        <Tile label="Berita" icon="newspaper-outline" onPress={() => router.push("/tabs/berita")} />
-        <Tile label="Dashboard" icon="grid-outline" onPress={() => { /* stay */ }} />
-        <Tile label="Inbox" icon="mail-unread-outline" onPress={() => router.push("/tabs/inbox")} />
-        <Tile label="Profil" icon="person-circle-outline" onPress={() => router.push("/tabs/profil")} />
+      {/* Statistik Bulanan */}
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>Statistik Bulan Ini</Text>
+        <Text style={styles.cardSubtitle}>
+          {laporanPresensi.bulan} {laporanPresensi.tahun}
+        </Text>
+
+        {/* Diagram Lingkaran */}
+        <PieChart
+          data={data}
+          width={screenWidth - 32}
+          height={220}
+          chartConfig={{
+            color: (opacity = 1) => `rgba(0, 0, 0, ${opacity})`,
+          }}
+          accessor={"jumlah"}
+          backgroundColor={"transparent"}
+          paddingLeft={"15"}
+          absolute
+        />
       </View>
-    </View>
+
+      {/* Info tambahan */}
+      <View style={styles.infoCard}>
+        <Text style={styles.infoText}>
+          Diagram ini menampilkan perbandingan total hadir, pulang, dan izin Anda selama bulan ini.
+        </Text>
+      </View>
+    </ScrollView>
   );
 }
 
-function Tile({ label, icon, onPress }: { label: string; icon: any; onPress: () => void }) {
-  return (
-    <TouchableOpacity style={s.tile} onPress={onPress} activeOpacity={0.85}>
-      <View style={s.iconWrap}>
-        <Ionicons name={icon} size={22} color={C.brand} />
-      </View>
-      <Text style={s.tileText}>{label}</Text>
-    </TouchableOpacity>
-  );
-}
-
-const s = StyleSheet.create({
-  center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: C.bg },
-  container: { flex: 1, backgroundColor: C.bg, padding: 16 },
-  header: { marginBottom: 12 },
-  hi: { fontSize: 18, fontWeight: "800", color: C.text },
-  sub: { color: C.sub, marginTop: 4 },
-  grid: { flexDirection: "row", flexWrap: "wrap", gap: 12, marginTop: 8 },
-  tile: {
-    width: "47%",
-    borderRadius: 14, borderWidth: 1, borderColor: C.border,
-    backgroundColor: "#fff", paddingVertical: 16, paddingHorizontal: 12,
-    alignItems: "center", justifyContent: "center", gap: 10,
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: "#F9FAFB",
   },
-  iconWrap: {
-    width: 40, height: 40, borderRadius: 12,
-    borderWidth: 1, borderColor: C.border,
-    alignItems: "center", justifyContent: "center", backgroundColor: "#f8fafc",
+  header: {
+    backgroundColor: "#42909b",
+    paddingVertical: 40,
+    alignItems: "center",
+    borderBottomLeftRadius: 30,
+    borderBottomRightRadius: 30,
+    marginBottom: 20,
   },
-  tileText: { fontWeight: "700", color: C.text },
+  headerTitle: {
+    fontSize: 22,
+    fontWeight: "700",
+    color: "#fff",
+  },
+  headerSubtitle: {
+    fontSize: 16,
+    color: "#e3f2f4",
+    marginTop: 6,
+  },
+  card: {
+    backgroundColor: "#fff",
+    marginHorizontal: 16,
+    padding: 20,
+    borderRadius: 16,
+    shadowColor: "#000",
+    shadowOpacity: 0.1,
+    shadowOffset: { width: 0, height: 2 },
+    shadowRadius: 6,
+    elevation: 3,
+  },
+  cardTitle: {
+    fontSize: 18,
+    fontWeight: "600",
+    marginBottom: 4,
+    color: "#222",
+    textAlign: "center",
+  },
+  cardSubtitle: {
+    fontSize: 15,
+    color: "#777",
+    textAlign: "center",
+    marginBottom: 20,
+  },
+  infoCard: {
+    backgroundColor: "#E7F3FF",
+    padding: 16,
+    borderRadius: 12,
+    margin: 16,
+  },
+  infoText: {
+    color: "#1E40AF",
+    fontSize: 14,
+    textAlign: "center",
+    lineHeight: 20,
+  },
 });
