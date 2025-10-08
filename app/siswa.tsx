@@ -1,4 +1,3 @@
-// app/siswa.tsx
 import React, { useState } from "react";
 import {
   View,

@@ -1,4 +1,3 @@
-// app/doa.tsx (atau app/(tabs)/doa.tsx)
 import React, { useCallback, useEffect, useState } from "react";
 import {
   View,

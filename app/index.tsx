@@ -1,4 +1,3 @@
-// app/index.tsx
 import React, { useEffect, useState } from "react";
 import { View, Text, ActivityIndicator, StyleSheet, Platform } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";

@@ -1,4 +1,3 @@
-// app/surah.tsx
 import { router, Stack } from "expo-router";
 import React, { useCallback, useEffect, useState } from "react";
 import {
