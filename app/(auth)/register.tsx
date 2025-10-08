@@ -15,7 +15,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Application from "expo-application";
 import { Ionicons } from "@expo/vector-icons";
 
-const API_BASE = "https://your-api-domain.com/api"; // TODO: ganti ke domain API kamu
+const API_BASE = "https://localhost:8000/api"; // TODO: ganti ke domain API kamu
 
 const COLORS = {
   brand: "#42909b",

@@ -28,13 +28,13 @@ const COLORS = {
 const AVATAR_SIZE = 104;
 const API_URL = 
   Platform.OS === "android"
-    ? "http://192.123.99.156:8000/api/profil"
-    : "http://localhost:8000/api/profil";
+    ? "http://172.31.129.242:8000/api/profile"
+    : "http://localhost:8000/api/profile";
 
 export default function ProfilScreen() {
   const [username, setUsername] = useState("");
   const [nama, setNama] = useState("");
-  const [unit, setUnit] = useState("");
+  const [unitId, setUnitId] = useState("");
   const [photoUri, setPhotoUri] = useState<string | null>(null);
 
   const [editing, setEditing] = useState(false);
@@ -64,16 +64,17 @@ export default function ProfilScreen() {
           return;
         }
 
-        // Jika ada data user di storage, gunakan itu dulu
+        // Jika ada data user di storage, gunakan itu dulu sebagai fallback
         if (userData) {
           const user = JSON.parse(userData);
           setUsername(user.username || "");
           setNama(user.nama || "");
-          setUnit(user.unit || "");
-          console.log("✅ Data user dari storage:", user);
+          setUnitId(String(user.unit_id || ""));
+          console.log("✅ Data user dari storage (fallback):", user);
         }
 
-        console.log("📡 Fetching profil dari:", API_URL);
+        // Fetch data profil terbaru dari database
+        console.log("📡 Fetching profil dari database:", API_URL);
         
         const res = await fetch(API_URL, {
           method: "GET",
@@ -87,19 +88,33 @@ export default function ProfilScreen() {
         console.log("📊 Response status:", res.status);
         
         const json = await res.json();
-        console.log("📦 Response data:", JSON.stringify(json, null, 2));
+        console.log("📦 Response data dari database:", JSON.stringify(json, null, 2));
 
-        if (json.status === "success" && json.data) {
-          const data = json.data;
-          console.log("✅ Data profil berhasil dimuat:", data);
+        if (json.status === "success" && json.user) {
+          const user = json.user;
+          const profil = user.profil;
           
-          setUsername(data.username || "");
-          setNama(data.nama || "");
-          setUnit(data.unit || "");
-          setPhotoUri(data.photo || null);
+          console.log("✅ Data profil dari database berhasil dimuat:", { user, profil });
+          
+          // Update state dengan data dari database
+          setUsername(user.username || "");
+          setNama(profil?.nama_pegawai || user.username || "");
+          setUnitId(String(profil?.unit_id || user.unit_id || ""));
+          setPhotoUri(json.photo_url || null);
+          
+          // Update juga data di AsyncStorage supaya sinkron
+          const updatedUser = {
+            id: user.id,
+            username: user.username,
+            nama: profil?.nama_pegawai || user.username,
+            unit_id: profil?.unit_id || user.unit_id,
+            role: user.role,
+          };
+          await AsyncStorage.setItem("auth.user", JSON.stringify(updatedUser));
+          console.log("💾 Data profil diupdate di AsyncStorage");
         } else {
           console.log("⚠️ Fetch profil gagal:", json.message);
-          Alert.alert("Gagal", json.message || "Tidak dapat memuat profil");
+          Alert.alert("Gagal", json.message || "Tidak dapat memuat profil dari database");
         }
       } catch (e) {
         console.error("❌ Error fetch profil:", e);
@@ -149,9 +164,8 @@ export default function ProfilScreen() {
       }
 
       const formData = new FormData();
-      formData.append("username", username);
-      formData.append("unit", unit);
-      formData.append("nama", nama);
+      if (nama) formData.append("nama_pegawai", nama);
+      if (unitId) formData.append("unit_id", unitId);
 
       if (photoUri && photoUri.startsWith('file://')) {
         formData.append("photo", {
@@ -184,12 +198,14 @@ export default function ProfilScreen() {
           headers: { Authorization: `Bearer ${token}` },
         });
         const reloadJson = await reloadRes.json();
-        if (reloadJson.status === "success") {
-          const data = reloadJson.data;
-          setUsername(data.username || "");
-          setNama(data.nama || "");
-          setUnit(data.unit || "");
-          setPhotoUri(data.photo || null);
+        if (reloadJson.status === "success" && reloadJson.user) {
+          const user = reloadJson.user;
+          const profil = user.profil;
+          
+          setUsername(user.username || "");
+          setNama(profil?.nama_pegawai || "");
+          setUnitId(String(profil?.unit_id || ""));
+          setPhotoUri(reloadJson.photo_url || null);
         }
       } else {
         Alert.alert("Gagal", json.message || "Update profil gagal");
@@ -267,28 +283,35 @@ export default function ProfilScreen() {
         {/* Data Profil */}
         <View style={styles.card}>
           <Text style={styles.label}>Username</Text>
-          {editing ? (
-            <TextInput value={username} onChangeText={setUsername} style={styles.input} />
-          ) : (
-            <Text style={styles.value}>{username || "Belum diisi"}</Text>
-          )}
+          <Text style={styles.value}>{username || "Belum diisi"}</Text>
         </View>
 
         <View style={styles.card}>
-          <Text style={styles.label}>Nama</Text>
+          <Text style={styles.label}>Nama Pegawai</Text>
           {editing ? (
-            <TextInput value={nama} onChangeText={setNama} style={styles.input} />
+            <TextInput 
+              value={nama} 
+              onChangeText={setNama} 
+              style={styles.input}
+              placeholder="Masukkan nama lengkap"
+            />
           ) : (
             <Text style={styles.value}>{nama || "Belum diisi"}</Text>
           )}
         </View>
 
         <View style={styles.card}>
-          <Text style={styles.label}>Unit</Text>
+          <Text style={styles.label}>Unit ID</Text>
           {editing ? (
-            <TextInput value={unit} onChangeText={setUnit} style={styles.input} />
+            <TextInput 
+              value={unitId} 
+              onChangeText={setUnitId} 
+              style={styles.input}
+              keyboardType="numeric"
+              placeholder="Masukkan ID Unit"
+            />
           ) : (
-            <Text style={styles.value}>{unit || "Belum diisi"}</Text>
+            <Text style={styles.value}>{unitId || "Belum diisi"}</Text>
           )}
         </View>
 

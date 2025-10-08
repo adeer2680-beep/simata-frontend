@@ -23,7 +23,7 @@ interface ReportRow {
 }
 
 // Ganti dengan URL API Anda
-const API_BASE_URL = "https://your-api-url.com/api";
+const API_BASE_URL = "http://localhost:8081/api";
 
 export default function LaporanScreen() {
   const navigation = useNavigation();
