@@ -21,7 +21,7 @@ const C = {
 
 const API_URL =
   Platform.OS === "android"
-    ? "http://192.123.99.156:8000/api/login"
+    ? "http://192.168.43.182:8000/api/login"
     : "http://localhost:8000/api/login";
 
 export default function LoginScreen() {

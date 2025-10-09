@@ -49,7 +49,7 @@ Notifications.setNotificationHandler({
 
 export default function IjinScreen() {
   const [nama, setNama] = useState("");
-  const [unitId, setUnitId] = useState(""); // ← WAJIB angka (exists:units,id)
+  const [unit_id, setUnitId] = useState(""); // ← WAJIB angka (exists:units,id)
   const [tanggal, setTanggal] = useState("");
   const [keterangan, setKeterangan] = useState("");
   const [loading, setLoading] = useState(false);
@@ -87,10 +87,10 @@ export default function IjinScreen() {
   }, []);
 
   const unitIsValidNumber = useMemo(() => {
-    if (!unitId.trim()) return false;
-    const n = Number(unitId);
+    if (!unit_id.trim()) return false;
+    const n = Number(unit_id);
     return Number.isInteger(n) && n > 0;
-  }, [unitId]);
+  }, [unit_id]);
 
   const fireSuccessNotification = async (p: { nama: string; tanggal: string }) => {
     try {
@@ -119,7 +119,7 @@ export default function IjinScreen() {
 
       const payload = {
         nama: nama.trim(),
-        unit_id: Number(unitId),     // ✅ sesuai validator backend
+        unit_id: Number(unit_id),     // ✅ sesuai validator backend
         tanggal: tanggal.trim(),     // ✅ 'date'
         keterangan: keterangan.trim() || null, // ✅ nullable
       };
@@ -203,7 +203,7 @@ export default function IjinScreen() {
             <TextInput
               placeholder="Unit ID (angka, contoh: 1)"
               placeholderTextColor={C.sub}
-              value={unitId}
+              value={unit_id}
               onChangeText={setUnitId}
               style={s.input}
               keyboardType="number-pad"
