@@ -15,7 +15,11 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Application from "expo-application";
 import { Ionicons } from "@expo/vector-icons";
 
-const API_BASE = "https://192.168.1.45:8000/api/register"; // TODO: ganti ke domain API kamu
+// PAKAI IP LAN SERVER LARAVEL-MU (bukan localhost)
+const API_BASE =
+  Platform.OS === "android"
+    ? "http://192.168.43.182:8000/api"
+    : "http://192.168.43.182:8000/api";
 
 const COLORS = {
   brand: "#42909b",
@@ -41,19 +45,20 @@ export default function RegisterScreen() {
 
         if (!id) {
           if (Platform.OS === "android") {
-            const got = Application.getAndroidId?.() ?? "";
+            // getAndroidId() itu async → wajib ditunggu
+            const got = (await Application.getAndroidId?.()) ?? "";
             if (got) id = got;
           } else if (Platform.OS === "ios") {
             // Opsional jika suatu saat support iOS
-            const iosId = await Application.getIosIdForVendorAsync?.();
+            const iosId = (await Application.getIosIdForVendorAsync?.()) ?? "";
             if (iosId) id = iosId;
           }
           if (id) await AsyncStorage.setItem("device.id", id);
         }
 
-        setImei(id);
+        setImei(id || ""); // biarkan kosong kalau gagal, supaya validasi jalan
       } catch {
-        setImei("");
+        setImei(""); // fallback kosong agar kelihatan di UI
       }
     })();
   }, []);
@@ -71,7 +76,7 @@ export default function RegisterScreen() {
     try {
       setLoading(true);
 
-      const res = await fetch(`${API_BASE}/register-aplikasi`, {
+      const res = await fetch(`${API_BASE}/register`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
         body: JSON.stringify({
@@ -99,8 +104,8 @@ export default function RegisterScreen() {
 
       const data = await res.json();
       await AsyncStorage.multiSet([
-        ["auth.token", data.access_token],
-        ["auth.user", JSON.stringify(data.user)],
+        ["auth.token", String(data.access_token || "")],
+        ["auth.user", JSON.stringify(data.user ?? {})],
       ]);
 
       Alert.alert("Berhasil", data?.message ?? "Registrasi sukses 🎉");
