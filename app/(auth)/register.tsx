@@ -15,10 +15,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Application from "expo-application";
 import { Ionicons } from "@expo/vector-icons";
 
-const API_BASE =
-  Platform.OS === "android"
-    ? "http://192.168.43.182:8000/api"
-    : "http://192.168.43.182:8000/api";
+const API_BASE = "https://192.168.1.45:8000/api/register"; // TODO: ganti ke domain API kamu
 
 const COLORS = {
   brand: "#42909b",
@@ -56,7 +53,7 @@ export default function RegisterScreen() {
 
         setImei(id);
       } catch {
-        setImei("12345678");
+        setImei("");
       }
     })();
   }, []);
@@ -74,7 +71,7 @@ export default function RegisterScreen() {
     try {
       setLoading(true);
 
-      const res = await fetch(`${API_BASE}/register`, {
+      const res = await fetch(`${API_BASE}/register-aplikasi`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
         body: JSON.stringify({

@@ -1,3 +1,4 @@
+// app/index.tsx
 import { Entypo, Feather, Ionicons, MaterialIcons } from "@expo/vector-icons";
 import { Link, type Href, router } from "expo-router"; 
 import React, { useEffect, useMemo, useState } from "react";
@@ -35,7 +36,7 @@ const SHADOW = Platform.select({
 
 // ====== PRAYER API (MyQuran) CONFIG ======
 const MYQURAN_BASE = "https://api.myquran.com/v2/sholat";
-const CITY_KEYWORD = "Kota Mojokerto";
+const CITY_KEYWORD = "Mojokerto";
 
 type Item = {
   label: string;
@@ -302,6 +303,7 @@ export default function Beranda() {
       {/* GRID */}
       <Text style={styles.gridHeading}>Menu Utama</Text>
       <FlatList
+        key={numColumns}
         data={ITEMS}
         keyExtractor={(it) => it.label}
         renderItem={renderItem}

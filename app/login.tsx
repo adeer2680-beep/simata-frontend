@@ -1,3 +1,4 @@
+// app/login.tsx
 import React, { useMemo, useState } from "react";
 import {
   View, Text, StyleSheet, TextInput, TouchableOpacity,
@@ -6,7 +7,6 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { Link } from "expo-router";
 
 const C = {
   bg: "#ffffff",
@@ -21,7 +21,7 @@ const C = {
 
 const API_URL =
   Platform.OS === "android"
-    ? "http://192.168.43.182:8000/api/login"
+    ? "http://localhost:8000/api/login"
     : "http://localhost:8000/api/login";
 
 export default function LoginScreen() {
@@ -175,16 +175,6 @@ const handleLogin = async () => {
                 style={s.input} keyboardType="numeric"
               />
             </View>
-            
-            {/* === LINK KE /register === */}
-            <View style={{ marginTop: 12 }}>
-              <Link href="/register" asChild>
-                <TouchableOpacity style={s.btnPrimary} activeOpacity={0.85}>
-                  <Ionicons name="person-add-outline" size={18} color="#fff" style={{ marginRight: 8 }} />
-                  <Text style={s.btnPrimaryText}>Daftar</Text>
-                </TouchableOpacity>
-              </Link>
-            </View>
 
             {err ? <Text style={s.errText}>{err}</Text> : null}
 
@@ -234,21 +224,4 @@ const s = StyleSheet.create({
   loginBtn: { backgroundColor: C.brand, borderRadius: 999, paddingVertical: 14, alignItems: "center", marginTop: 6 },
   loginText: { color: "#fff", fontWeight: "800", fontSize: 16 },
   errText: { color: C.danger, textAlign: "center", marginBottom: 8 },
-  btnPrimary: {
-    backgroundColor: C.brand,   // atau pakai C.brand jika kamu pakai alias C
-    borderRadius: 12,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 1,
-    borderColor: C.border,      // opsional
-  },
-  btnPrimaryText: {
-    color: "#fff",
-    fontWeight: "800",
-    fontSize: 14,
-    marginLeft: 8,
-  },
 });
