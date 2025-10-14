@@ -2,169 +2,212 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
   View, Text, StyleSheet, TouchableOpacity, TextInput, ScrollView,
-  Alert, Platform, StatusBar, ToastAndroid, KeyboardAvoidingView,
+  Alert, Platform, StatusBar, KeyboardAvoidingView, ActivityIndicator,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
-import * as Notifications from "expo-notifications";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+
+/**
+ * ====== KONFIG API ======
+ * - ANDROID EMULATOR => 10.0.2.2
+ * - DEVICE FISIK / iOS SIMULATOR => pakai IP LAN laptop kamu
+ */
+const LAN_IP = "192.168.43.182"; // ganti sesuai IP LAN kamu
+const USE_ANDROID_EMULATOR = true;
+
+const HOST =
+  Platform.OS === "android"
+    ? (USE_ANDROID_EMULATOR ? "10.0.2.2" : LAN_IP)
+    : LAN_IP;
+
+const API_BASE = `http://localhost:8000/api`;
+const IJIN_URL = `${API_BASE}/ijins`;
 
 const C = {
   bg: "#ffffff",
   text: "#0f172a",
-  sub: "#475569",
-  border: "#e5e7eb",
+  sub: "#6b7280",
   pill: "#f3f4f6",
+  border: "#e5e7eb",
   brand: "#42909b",
-  brandDim: "#77c3cc",
+  brandDim: "#a9d5db",
+  danger: "#ef4444",
 } as const;
 
-// ====== API BASE (sesuaikan dengan environment kamu) ======
-// Emulator Android: 10.0.2.2 -> host komputer
-// Device fisik: GANTI ke IP LAN laptop kamu, mis. "192.168.1.10"
-const HOST =
-  Platform.OS === "android"
-    ? "10.0.2.2"   // emulator Android
-    : "localhost"; // iOS simulator / Mac
-
-const API_URL = `http://${HOST}:8000/api/ijins`;
-
-// Helper: YYYY-MM-DD
-function toISODate(d: Date) {
+const toISODate = (d = new Date()) => {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${dd}`;
+};
+
+type IjinItem = {
+  id: number;
+  unit_id: number;
+  tanggal: string;
+  keterangan: string | null;
+  created_at?: string;
+  updated_at?: string;
+};
+
+function safeJson(text: string) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
 }
 
-// Notifikasi (foreground)
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowBanner: true,
-    shouldShowList: true,
-    shouldPlaySound: false,
-    shouldSetBadge: false,
-  }),
-});
-
 export default function IjinScreen() {
-  const [nama, setNama] = useState("");
-  const [unit_id, setUnitId] = useState(""); // ← WAJIB angka (exists:units,id)
-  const [tanggal, setTanggal] = useState("");
+  const [unit_id, setUnitId] = useState("");
+  const [unitLabel, setUnitLabel] = useState<string>("");
+  const [tanggal, setTanggal] = useState(toISODate());
   const [keterangan, setKeterangan] = useState("");
   const [loading, setLoading] = useState(false);
+  const [listLoading, setListLoading] = useState(false);
+  const [items, setItems] = useState<IjinItem[]>([]);
 
-  // Minta izin notifikasi + channel Android
-  useEffect(() => {
-    (async () => {
-      const { status } = await Notifications.getPermissionsAsync();
-      if (status !== "granted") await Notifications.requestPermissionsAsync();
-      if (Platform.OS === "android") {
-        await Notifications.setNotificationChannelAsync("default", {
-          name: "default",
-          importance: Notifications.AndroidImportance.MAX,
-        });
-      }
-    })();
-  }, []);
-
-  // Auto-isi tanggal hari ini
-  useEffect(() => {
-    setTanggal(toISODate(new Date()));
-  }, []);
-
-  // 🔹 Auto-isi dari user yang sudah login (auth.user)
-  useEffect(() => {
-    (async () => {
-      try {
-        const raw = await AsyncStorage.getItem("auth.user");
-        if (!raw) return;
-        const u = JSON.parse(raw);
-        setNama(u?.nama ?? u?.username ?? "");
-        if (u?.unit_id != null) setUnitId(String(u.unit_id));
-      } catch {}
-    })();
-  }, []);
-
-  const unitIsValidNumber = useMemo(() => {
+  const unitValid = useMemo(() => {
     if (!unit_id.trim()) return false;
     const n = Number(unit_id);
     return Number.isInteger(n) && n > 0;
   }, [unit_id]);
 
-  const fireSuccessNotification = async (p: { nama: string; tanggal: string }) => {
+  // === Ambil unit dari sesi login
+  const loadUnitFromSession = async () => {
     try {
-      await Notifications.scheduleNotificationAsync({
-        content: { title: "Izin terkirim ✅", body: `${p.nama} • ${p.tanggal}` },
-        trigger: null,
-      });
-    } catch {
-      if (Platform.OS === "android") {
-        ToastAndroid.show("Izin terkirim", ToastAndroid.SHORT);
+      const userStr = await AsyncStorage.getItem("auth.user");
+      if (!userStr) return;
+      const user = JSON.parse(userStr);
+      const uid = Number(user?.unit_id ?? 0);
+      if (uid > 0) setUnitId(String(uid));
+      if (user?.unit) setUnitLabel(String(user.unit));
+
+      // tampilkan log sesi
+      if (__DEV__) {
+        const token = await AsyncStorage.getItem("auth.token");
+        console.log("🔐 Sesi Login Ditemukan:");
+        console.log({
+          tokenPreview: token ? token.slice(0, 15) + "..." : null,
+          user,
+        });
       }
+    } catch (e) {
+      console.log("❌ Gagal parsing sesi login:", e);
     }
   };
 
+  // === Ambil header auth
+  const getAuthHeader = async (): Promise<Record<string, string>> => {
+    const token = await AsyncStorage.getItem("auth.token");
+    if (!token) {
+      Alert.alert("Sesi Habis", "Silakan login ulang.");
+      router.replace("/login");
+      return {};
+    }
+    return {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+      Authorization: `Bearer ${token}`,
+    };
+  };
+
+  // === GET daftar ijin
+  const fetchList = async () => {
+    try {
+      setListLoading(true);
+      const headers = await getAuthHeader();
+      if (!headers.Authorization) return;
+
+      const res = await fetch(IJIN_URL, { headers });
+      const raw = await res.text();
+      if (!res.ok) throw new Error(`GET /ijin ${res.status} ${raw}`);
+      const data = safeJson(raw);
+      const arr = Array.isArray(data) ? data : data?.data ?? [];
+      setItems(arr);
+      if (__DEV__) console.log("📦 Data ijin:", arr);
+    } catch (e: any) {
+      console.log("❌ Fetch list failed:", e?.message);
+    } finally {
+      setListLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadUnitFromSession();
+    fetchList();
+  }, []);
+
+  // === POST form ijin
   const handleSubmit = async () => {
-    if (!nama.trim() || !unitIsValidNumber || !tanggal.trim()) {
-      Alert.alert("Lengkapi Data", "Nama, Unit ID (angka), dan Tanggal wajib diisi.");
+    if (!unitValid || !tanggal.trim()) {
+      Alert.alert("Lengkapi Data", "Unit ID dan Tanggal wajib diisi.");
       return;
     }
 
+    const body = {
+      unit_id: Number(unit_id),
+      tanggal: tanggal.trim(),
+      keterangan: keterangan.trim() || null,
+    };
+
     try {
       setLoading(true);
+      const headers = await getAuthHeader();
+      if (!headers.Authorization) return;
 
-      // Sertakan token jika rute diproteksi sanctum/passport
-      const token = (await AsyncStorage.getItem("auth.token")) ?? "";
+      console.log("➡️ [KIRIM IJIN]");
+      console.log("URL:", IJIN_URL);
+      console.log("Headers:", headers);
+      console.log("Body:", body);
 
-      const payload = {
-        nama: nama.trim(),
-        unit_id: Number(unit_id),     // ✅ sesuai validator backend
-        tanggal: tanggal.trim(),     // ✅ 'date'
-        keterangan: keterangan.trim() || null, // ✅ nullable
-      };
-
-      const res = await fetch(API_URL, {
+      const res = await fetch(IJIN_URL, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify(payload),
+        headers,
+        body: JSON.stringify(body),
       });
 
       const raw = await res.text();
-      console.log("[IJIN][POST]", res.status, raw); // DEBUG: lihat di Metro log
+      const j = safeJson(raw);
 
-      if (!res.ok) {
-        if (res.status === 422) {
-          try {
-            const j = JSON.parse(raw);
-            const msgs = j?.errors
-              ? (Object.values(j.errors) as string[][]).flat().join("\n")
-              : j?.message || "Validasi gagal (422).";
-            throw new Error(msgs);
-          } catch {
-            throw new Error("Validasi gagal (422).");
-          }
-        }
-        throw new Error(`HTTP ${res.status} – ${raw}`);
+      console.log("⬅️ [RESP IJIN]");
+      console.log("Status:", res.status);
+      console.log("Respon Text:", raw);
+      console.log("Respon JSON:", j);
+
+      if (res.status === 401 || res.status === 403) {
+        Alert.alert("Sesi Habis", "Silakan login ulang.");
+        router.replace("/login");
+        return;
       }
 
-      await fireSuccessNotification({ nama, tanggal });
-      Alert.alert("Berhasil", "Pengajuan izin telah dikirim.");
+      if (res.status === 422) {
+        const err = j?.errors
+          ? Object.entries(j.errors)
+              .map(([key, val]) => `${key}: ${(val as string[]).join(", ")}`)
+              .join("\n")
+          : j?.message || raw;
+        Alert.alert("Validasi Gagal", err);
+        console.log("⚠️ 422 Error:", err);
+        return;
+      }
 
-      // Reset form
-      setNama("");
-      setUnitId("");
+      if (!res.ok) {
+        Alert.alert("Gagal Simpan", j?.message || raw);
+        console.log("❌ Error:", j?.message || raw);
+        return;
+      }
+
+      console.log("✅ Ijin berhasil disimpan ke database!");
+      Alert.alert("Berhasil", "Ijin berhasil dikirim.");
       setKeterangan("");
-      setTanggal(toISODate(new Date()));
-
+      setTanggal(toISODate());
+      await fetchList();
       router.back();
     } catch (e: any) {
-      console.error(e);
-      Alert.alert("Gagal", e?.message ?? "Tidak bisa mengirim data.");
+      console.log("❌ Network / Fetch error:", e?.message);
+      Alert.alert("Gagal", e?.message ?? "Terjadi kesalahan jaringan.");
     } finally {
       setLoading(false);
     }
@@ -172,41 +215,26 @@ export default function IjinScreen() {
 
   return (
     <View style={s.container}>
-      <StatusBar barStyle="light-content" backgroundColor={C.brand} />
-
-      {/* Header */}
+      <StatusBar backgroundColor={C.brand} barStyle="light-content" />
       <View style={s.header}>
-        <TouchableOpacity onPress={() => router.back()} style={{ marginRight: 12 }}>
+        <TouchableOpacity onPress={() => router.back()} style={{ paddingRight: 8 }}>
           <Ionicons name="arrow-back" size={22} color="#fff" />
         </TouchableOpacity>
-        <Text style={s.headerTitle}>Izin</Text>
+        <Text style={s.headerTitle}>Form Ijin</Text>
       </View>
 
-      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
-        <ScrollView
-          contentContainerStyle={{ padding: 16 }}
-          keyboardShouldPersistTaps="handled"   // ⬅️ tombol submit tetap klik saat keyboard terbuka
-        >
-          {/* Nama */}
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+        <ScrollView contentContainerStyle={{ padding: 16 }} keyboardShouldPersistTaps="handled">
+          {/* Unit ID */}
           <View style={s.pill}>
             <TextInput
-              placeholder="Nama"
+              placeholder="Unit ID (otomatis dari akun)"
               placeholderTextColor={C.sub}
-              value={nama}
-              onChangeText={setNama}
-              style={s.input}
-            />
-          </View>
-
-          {/* Unit ID (HARUS angka) */}
-          <View style={s.pill}>
-            <TextInput
-              placeholder="Unit ID (angka, contoh: 1)"
-              placeholderTextColor={C.sub}
+              keyboardType="number-pad"
               value={unit_id}
               onChangeText={setUnitId}
               style={s.input}
-              keyboardType="number-pad"
+              editable={false}
             />
           </View>
 
@@ -221,10 +249,10 @@ export default function IjinScreen() {
             />
           </View>
 
-          {/* Keterangan (opsional) */}
-          <View style={s.pill}>
+          {/* Keterangan */}
+          <View style={[s.pill, { borderRadius: 16 }]}>
             <TextInput
-              placeholder="Keterangan (opsional)"
+              placeholder="Keterangan"
               placeholderTextColor={C.sub}
               value={keterangan}
               onChangeText={setKeterangan}
@@ -233,19 +261,39 @@ export default function IjinScreen() {
             />
           </View>
 
-          {/* Submit */}
           <TouchableOpacity
             onPress={handleSubmit}
-            disabled={loading}
+            disabled={loading || !unitValid || !tanggal.trim()}
             style={[
               s.submitBtn,
-              (!nama.trim() || !unitIsValidNumber || !tanggal.trim() || loading) && { backgroundColor: C.brandDim },
+              (!unitValid || !tanggal.trim() || loading) && { backgroundColor: C.brandDim },
             ]}
           >
-            <Text style={s.submitText}>{loading ? "Mengirim..." : "Submit"}</Text>
+            {loading ? <ActivityIndicator color="#fff" /> : <Text style={s.submitText}>Kirim Ijin</Text>}
           </TouchableOpacity>
 
-          <View style={{ height: 24 }} />
+          {/* Riwayat ijin */}
+          <View style={{ marginTop: 24 }}>
+            <Text style={s.sectionTitle}>Riwayat Ijin Saya</Text>
+            {listLoading ? (
+              <ActivityIndicator />
+            ) : items.length === 0 ? (
+              <Text style={{ color: C.sub, marginTop: 8 }}>Belum ada data.</Text>
+            ) : (
+              items.map((it) => (
+                <View key={it.id} style={s.card}>
+                  <View style={{ flexDirection: "row", alignItems: "center" }}>
+                    <Ionicons name="document-text-outline" size={18} color={C.text} />
+                    <Text style={s.cardTitle}>  #{it.id} • Unit {it.unit_id}</Text>
+                  </View>
+                  <Text style={s.cardSub}>Tanggal: {it.tanggal}</Text>
+                  {it.keterangan ? <Text style={s.cardSub}>Keterangan: {it.keterangan}</Text> : null}
+                </View>
+              ))
+            )}
+          </View>
+
+          <View style={{ height: 32 }} />
         </ScrollView>
       </KeyboardAvoidingView>
     </View>
@@ -254,34 +302,38 @@ export default function IjinScreen() {
 
 const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: C.bg },
-
   header: {
     flexDirection: "row",
     alignItems: "center",
+    backgroundColor: C.brand,
     paddingHorizontal: 16,
     paddingVertical: 12,
-    backgroundColor: C.brand,
   },
-  headerTitle: { fontSize: 16, fontWeight: "700", color: "#fff", flex: 1 },
-
+  headerTitle: { color: "#fff", fontSize: 16, fontWeight: "700" },
   pill: {
     backgroundColor: C.pill,
     borderRadius: 999,
-    paddingHorizontal: 18,
+    paddingHorizontal: 16,
     paddingVertical: 10,
     marginBottom: 12,
   },
-  input: {
-    color: C.text,
-    fontSize: 14,
-  },
-
+  input: { color: C.text, fontSize: 14 },
   submitBtn: {
     backgroundColor: C.brand,
     borderRadius: 999,
     paddingVertical: 14,
     alignItems: "center",
-    marginTop: 8,
   },
   submitText: { color: "#fff", fontWeight: "700" },
+  sectionTitle: { fontSize: 14, fontWeight: "700", color: C.text },
+  card: {
+    backgroundColor: "#fff",
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 12,
+    padding: 12,
+    marginTop: 10,
+  },
+  cardTitle: { color: C.text, fontWeight: "700" },
+  cardSub: { color: C.sub, marginTop: 4, fontSize: 12 },
 });
