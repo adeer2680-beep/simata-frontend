@@ -23,7 +23,7 @@ const ENV_BASE = process.env.EXPO_PUBLIC_API_BASE;
 const DEFAULT_BASE =
   Platform.OS === "android"
     ? "http://10.0.2.2:8000"        // emulator
-    : "http://192.168.43.182:8000"; // ganti ke IP LAN servermu
+    : "http://localhost:8000"; // ganti ke IP LAN servermu
 
 const API_BASE = ENV_BASE || DEFAULT_BASE;
 const API_URL = `${API_BASE}/api/login`;
