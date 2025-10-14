@@ -1,4 +1,4 @@
-import React, { useMemo } from "react";
+import React, { useState, useEffect } from "react";
 import {
   View,
   Text,
@@ -9,37 +9,35 @@ import {
   Linking,
   Dimensions,
   Platform,
+  ActivityIndicator,
+  Alert,
+  RefreshControl,
 } from "react-native";
 
-// ==== Dummy Data (tanpa API) ====
-type YTRow = { id?: string; nama: string; url: string; durationSec?: number | null; views?: number | null; tags?: string[] };
+// ==== Config API ====
+const API_BASE_URL = "http://localhost:8000";
+const API_ENDPOINT = "/videos";
 
-const DATA: YTRow[] = [
-  { nama: "Intro SIMATA - Visi & Modul", url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ", durationSec: 212, views: 125000, tags: ["SIMATA","intro"] },
-  { nama: "Tutorial Presensi Siswa (Datang & Pulang)", url: "https://youtu.be/9bZkp7q19f0", durationSec: 458, views: 987654, tags: ["presensi","siswa"] },
-  { nama: "Cara Akses Berita & Pengumuman", url: "https://www.youtube.com/watch?v=3JZ_D3ELwOQ", durationSec: 315, views: 54321, tags: ["berita","pengumuman"] },
-  { nama: "PPDB Online: Alur Pendaftaran", url: "https://youtu.be/e-ORhEE9VVg", durationSec: 606, views: 210345, tags: ["PPDB","alur"] },
-  { nama: "Dashboard Guru: Rekap Nilai & Absensi", url: "https://www.youtube.com/watch?v=L_jWHffIx5E", durationSec: 389, views: 75310, tags: ["dashboard","guru"] },
-  { nama: "Inventaris Sekolah: Tambah & Audit", url: "https://youtu.be/kXYiU_JCYtU", durationSec: 271, views: 29000, tags: ["inventaris","audit"] },
-  { nama: "Kotak Masuk & Notifikasi Orang Tua", url: "https://www.youtube.com/watch?v=RgKAFK5djSk", durationSec: 244, views: 112000, tags: ["notifikasi","orangtua"] },
-  { nama: "Kalender Pendidikan & Event", url: "https://youtu.be/fJ9rUzIMcZQ", durationSec: 501, views: 660000, tags: ["kalender","event"] },
-  { nama: "Profil Pengguna & Keamanan Akun", url: "https://www.youtube.com/watch?v=opbmQJ2nO7c", durationSec: 298, views: 43210, tags: ["profil","keamanan"] },
-  { nama: "Best Practices SIMATA Harian", url: "https://youtu.be/2Vv-BfVoq4g", durationSec: 420, views: 77777, tags: ["bestpractice","harian"] },
-];
+console.log("=== API CONFIG ===");
+console.log("Base URL:", API_BASE_URL);
+console.log("Endpoint:", API_ENDPOINT);
+console.log("Full URL:", API_BASE_URL + API_ENDPOINT);
+console.log("==================");
 
-// ==== Utils: parse ID & thumbnail YouTube (tanpa API) ====
-type Thumbnail = { url: string; width: number; height: number };
+// ==== Types ====
 type YTVideo = {
-  id: string;
+  id: number;
   title: string;
-  url: string;
+  description?: string;
+  youtube_url: string;
   durationSec: number | null;
   durationLabel: string | null;
   views: number | null;
-  thumbnail: Thumbnail;
+  thumbnail: { url: string; width: number; height: number };
   tags: string[];
 };
 
+// ==== Utils: parse ID & thumbnail YouTube ====
 function parseYoutubeId(input: string): string | null {
   try {
     const u = new URL(input);
@@ -55,17 +53,9 @@ function parseYoutubeId(input: string): string | null {
   }
 }
 
-function makeThumbnail(id: string, quality: "maxres" | "sd" | "hq" | "mq" | "default" = "hq"): Thumbnail {
+function makeThumbnail(id: string, quality: "hq" = "hq") {
   const url = `https://img.youtube.com/vi/${id}/${quality}default.jpg`;
-  const sizes: Record<string, { w: number; h: number }> = {
-    maxres: { w: 1280, h: 720 },
-    sd: { w: 640, h: 480 },
-    hq: { w: 480, h: 360 },
-    mq: { w: 320, h: 180 },
-    default: { w: 120, h: 90 },
-  };
-  const s = sizes[quality];
-  return { url, width: s.w, height: s.h };
+  return { url, width: 480, height: 360 };
 }
 
 function formatDuration(sec?: number | null) {
@@ -73,7 +63,8 @@ function formatDuration(sec?: number | null) {
   const h = Math.floor(sec / 3600);
   const m = Math.floor((sec % 3600) / 60);
   const s = sec % 60;
-  if (h) return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  if (h)
+    return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
@@ -81,47 +72,181 @@ function formatViews(n?: number | null) {
   if (n == null) return "—";
   if (n < 1000) return `${n}`;
   if (n < 1_000_000) return `${(n / 1000).toFixed(1)}k`.replace(".0", "");
-  if (n < 1_000_000_000) return `${(n / 1_000_000).toFixed(1)}M`.replace(".0", "");
+  if (n < 1_000_000_000)
+    return `${(n / 1_000_000).toFixed(1)}M`.replace(".0", "");
   return `${(n / 1_000_000_000).toFixed(1)}B`.replace(".0", "");
 }
 
-function normalizeRow(row: YTRow): YTVideo {
-  const id = row.id || parseYoutubeId(row.url) || "";
-  const thumb = id ? makeThumbnail(id, "hq") : { url: "https://via.placeholder.com/1", width: 1, height: 1 };
+// Transform data dari backend ke format yang bisa digunakan frontend
+function normalizeVideo(data: any): YTVideo {
+  const id = parseYoutubeId(data.youtube_url) || "";
+  const thumb = id
+    ? makeThumbnail(id)
+    : { url: "", width: 480, height: 360 };
+
+  // Ambil dari field yang ada di backend
+  const tags = data.tags
+    ? Array.isArray(data.tags)
+      ? data.tags
+      : typeof data.tags === "string"
+        ? data.tags.split(",").map((t: string) => t.trim())
+        : []
+    : [];
+
   return {
-    id,
-    title: row.nama,
-    url: row.url,
-    durationSec: row.durationSec ?? null,
-    durationLabel: formatDuration(row.durationSec ?? null),
-    views: row.views ?? null,
+    id: data.id,
+    title: data.title,
+    description: data.description,
+    youtube_url: data.youtube_url,
+    durationSec: data.duration_sec || null,
+    durationLabel: formatDuration(data.duration_sec || null),
+    views: data.views || null,
     thumbnail: thumb,
-    tags: row.tags ?? [],
+    tags: tags,
   };
 }
 
-// ==== UI: Card List dalam ScrollView ====
-
+// ==== Component ====
 const { width } = Dimensions.get("window");
-const CARD_IMAGE_W = width - 32; // padding horizontal 16+16
-const CARD_IMAGE_H = Math.round(CARD_IMAGE_W * (9 / 16)); // rasio 16:9
+const CARD_IMAGE_W = width - 32;
+const CARD_IMAGE_H = Math.round(CARD_IMAGE_W * (9 / 16));
 
 export default function YouTubeListScreen() {
-  const videos = useMemo(() => DATA.map(normalizeRow), []);
+  const [videos, setVideos] = useState<YTVideo[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+
+  // Fetch data dari API
+  const fetchVideos = async () => {
+    try {
+      setError(null);
+      
+      console.log("🔄 Fetching dari:", `${API_BASE_URL}/api/videos`);
+
+      const response = await fetch(`${API_BASE_URL}/api/videos`, {
+        method: "GET",
+        headers: {
+          "Accept": "application/json",
+          "Content-Type": "application/json",
+        },
+      });
+
+      console.log("📊 Response status:", response.status);
+
+      if (!response.ok) {
+        throw new Error(`HTTP Error: ${response.status}`);
+      }
+
+      const data = await response.json();
+      console.log("✅ Data diterima:", data);
+
+      if (data.data && Array.isArray(data.data)) {
+        const normalized = data.data.map(normalizeVideo);
+        setVideos(normalized);
+        console.log("✅ Videos loaded:", normalized.length);
+      } else if (Array.isArray(data)) {
+        const normalized = data.map(normalizeVideo);
+        setVideos(normalized);
+        console.log("✅ Videos loaded:", normalized.length);
+      } else {
+        throw new Error("Format response tidak sesuai");
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Gagal memuat video";
+      setError(message);
+      console.error("❌ Fetch error:", err);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchVideos();
+  }, []);
+
+  const handleRefresh = () => {
+    setRefreshing(true);
+    fetchVideos();
+  };
+
+  const handleOpenVideo = (url: string) => {
+    Linking.openURL(url).catch(() => {
+      Alert.alert("Error", "Tidak bisa membuka URL video");
+    });
+  };
+
+  // Loading state
+  if (loading) {
+    return (
+      <View style={styles.centerContainer}>
+        <ActivityIndicator size="large" color="#0f172a" />
+        <Text style={styles.loadingText}>Memuat video tutorial...</Text>
+      </View>
+    );
+  }
+
+  // Error state
+  if (error) {
+    return (
+      <View style={styles.centerContainer}>
+        <Text style={styles.errorText}>Error: {error}</Text>
+        <Pressable style={styles.retryButton} onPress={handleRefresh}>
+          <Text style={styles.retryButtonText}>Coba Lagi</Text>
+        </Pressable>
+      </View>
+    );
+  }
+
+  // Empty state
+  if (videos.length === 0) {
+    return (
+      <View style={styles.centerContainer}>
+        <Text style={styles.emptyText}>Tidak ada video tutorial</Text>
+        <Pressable style={styles.retryButton} onPress={handleRefresh}>
+          <Text style={styles.retryButtonText}>Refresh</Text>
+        </Pressable>
+      </View>
+    );
+  }
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
+    <ScrollView
+      contentContainerStyle={styles.container}
+      refreshControl={
+        <RefreshControl
+          refreshing={refreshing}
+          onRefresh={handleRefresh}
+          tintColor="#0f172a"
+        />
+      }
+    >
       <Text style={styles.header}>Video Tutorial SIMATA</Text>
 
       {videos.map((v) => (
-        <Pressable key={v.id} style={styles.card} onPress={() => Linking.openURL(v.url)}>
+        <Pressable
+          key={v.id}
+          style={styles.card}
+          onPress={() => handleOpenVideo(v.youtube_url)}
+        >
           <View style={styles.thumbWrap}>
-            <Image
-              source={{ uri: v.thumbnail.url }}
-              style={styles.thumb}
-              resizeMode="cover"
-            />
-            {/* Badge Durasi */}
+            {v.thumbnail.url ? (
+              <Image
+                source={{ uri: v.thumbnail.url }}
+                style={styles.thumb}
+                resizeMode="cover"
+              />
+            ) : (
+              <View
+                style={[
+                  styles.thumb,
+                  { backgroundColor: "#e2e8f0", justifyContent: "center" },
+                ]}
+              >
+                <Text style={styles.placeholderText}>No Image</Text>
+              </View>
+            )}
             {v.durationLabel ? (
               <View style={styles.badge}>
                 <Text style={styles.badgeText}>{v.durationLabel}</Text>
@@ -152,11 +277,44 @@ const styles = StyleSheet.create({
     padding: 16,
     backgroundColor: "#f8fafc",
   },
+  centerContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "#f8fafc",
+  },
   header: {
     fontSize: 20,
     fontWeight: "800",
     color: "#0f172a",
     marginBottom: 12,
+  },
+  loadingText: {
+    marginTop: 12,
+    color: "#64748b",
+    fontSize: 14,
+  },
+  errorText: {
+    color: "#e11d48",
+    fontSize: 14,
+    textAlign: "center",
+    marginHorizontal: 16,
+  },
+  emptyText: {
+    color: "#64748b",
+    fontSize: 14,
+  },
+  retryButton: {
+    marginTop: 12,
+    paddingHorizontal: 24,
+    paddingVertical: 10,
+    backgroundColor: "#0f172a",
+    borderRadius: 8,
+  },
+  retryButtonText: {
+    color: "#fff",
+    fontWeight: "600",
+    fontSize: 14,
   },
   card: {
     backgroundColor: "#fff",
@@ -184,6 +342,10 @@ const styles = StyleSheet.create({
   thumb: {
     width: "100%",
     height: "100%",
+  },
+  placeholderText: {
+    color: "#94a3b8",
+    fontSize: 14,
   },
   badge: {
     position: "absolute",
