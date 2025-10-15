@@ -1,6 +1,6 @@
 // app/presensi/datang.tsx
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { Stack, useLocalSearchParams } from "expo-router";
+import { Stack, useLocalSearchParams, router } from "expo-router";
 import React, { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
@@ -14,13 +14,14 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 
 /* ========= UI ========= */
 const COLORS = {
   bg: "#ffffff",
   text: "#0f172a",
   sub: "#475569",
-  brand: "#0ea5a3",
+  brand: "#42909b", // ← ubah warna header di sini
   border: "#e5e7eb",
   danger: "#ef4444",
 };
@@ -35,10 +36,7 @@ const fmtTime = (d = new Date()) =>
     d.getMinutes()
   ).padStart(2, "0")}`;
 
-/* ========= KONFIG API =========
- * - ANDROID EMULATOR => 10.0.2.2
- * - DEVICE FISIK / iOS SIMULATOR => pakai IP LAN laptop kamu
- */
+/* ========= KONFIG API ========= */
 const LAN_IP = "192.168.43.182"; // ganti sesuai IP LAN kamu
 const USE_ANDROID_EMULATOR = true;
 
@@ -58,8 +56,8 @@ type AuthUser = {
   username?: string;
   role?: string;
   unit_id?: number | string;
-  nama?: string; // diset di login.tsx (displayName)
-  unit?: string; // diset di login.tsx (unitLabel)
+  nama?: string;
+  unit?: string;
 };
 
 export default function PresensiDatang() {
@@ -101,7 +99,7 @@ export default function PresensiDatang() {
     return () => clearInterval(id);
   }, []);
 
-  // baca sesi yang diset di login.tsx (auth.token, auth.tokenType, auth.user, auth.beranda)
+  // baca sesi
   useEffect(() => {
     (async () => {
       try {
@@ -137,7 +135,6 @@ export default function PresensiDatang() {
           setUnitId(null);
         }
 
-        // beranda hanya label gabungan, bukan logic
         if (!nameFromUser && beranda) {
           setDisplayName(beranda.split("•")[0].trim());
         }
@@ -220,8 +217,6 @@ export default function PresensiDatang() {
         when: new Date().toISOString(),
       });
 
-      console.log("🛰️ RES:", res.status, headersObj, json ?? rawText);
-
       if (res.status === 201) {
         const msg =
           json?.message ??
@@ -264,8 +259,7 @@ export default function PresensiDatang() {
       if (res.status >= 500) {
         Alert.alert(
           `Server Error ${res.status}`,
-          json?.message ??
-            "Terjadi error di server. Cek storage/logs/laravel.log."
+          json?.message ?? "Terjadi error di server. Cek storage/logs/laravel.log."
         );
         return;
       }
@@ -277,7 +271,6 @@ export default function PresensiDatang() {
           : rawText || "Respon tidak diketahui."
       );
     } catch (e: any) {
-      console.log("❌ SUBMIT error:", e?.message ?? e);
       setLastRes({
         status: 0,
         headers: {},
@@ -297,7 +290,29 @@ export default function PresensiDatang() {
   if (loading) {
     return (
       <>
-        <Stack.Screen options={{ title: "Presensi Datang" }} />
+        {/* Header: warna + tombol back bulat */}
+        <Stack.Screen
+          options={{
+            title: "Presensi Datang",
+            headerStyle: { backgroundColor: COLORS.brand },
+            headerTitleStyle: { color: "#fff", fontWeight: "800" },
+            headerTitleAlign: "center",
+            headerShadowVisible: false,
+            headerLeft: () => (
+              <TouchableOpacity
+                onPress={() => router.back()}
+                style={styles.backCircle}
+                activeOpacity={0.7}
+              >
+                <Ionicons
+                  name={Platform.OS === "ios" ? "chevron-back" : "arrow-back"}
+                  size={18}
+                  color="#000"
+                />
+              </TouchableOpacity>
+            ),
+          }}
+        />
         <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
           <ActivityIndicator size="large" />
           <Text style={{ marginTop: 8, color: COLORS.sub }}>Memuat sesi…</Text>
@@ -308,7 +323,30 @@ export default function PresensiDatang() {
 
   return (
     <>
-      <Stack.Screen options={{ title: "Presensi Datang" }} />
+      {/* Header: warna + tombol back bulat */}
+      <Stack.Screen
+        options={{
+          title: "Presensi Datang",
+          headerStyle: { backgroundColor: COLORS.brand },
+          headerTitleStyle: { color: "#fff", fontWeight: "800" },
+          headerTitleAlign: "center",
+          headerShadowVisible: false,
+          headerLeft: () => (
+            <TouchableOpacity
+              onPress={() => router.back()}
+              style={styles.backCircle}
+              activeOpacity={0.7}
+            >
+              <Ionicons
+                name={Platform.OS === "ios" ? "chevron-back" : "arrow-back"}
+                size={18}
+                color="#000"
+              />
+            </TouchableOpacity>
+          ),
+        }}
+      />
+
       <KeyboardAvoidingView
         behavior={Platform.OS === "ios" ? "padding" : undefined}
         style={{ flex: 1, backgroundColor: COLORS.bg }}
@@ -325,7 +363,7 @@ export default function PresensiDatang() {
             />
           </Field>
 
-          {/* Nama (otomatis dari sesi, read-only) */}
+          {/* Nama (otomatis) */}
           <Field label="Nama (otomatis)">
             <TextInput
               value={displayName}
@@ -334,7 +372,7 @@ export default function PresensiDatang() {
             />
           </Field>
 
-          {/* Unit (otomatis dari sesi, read-only) */}
+          {/* Unit (otomatis) */}
           <Field label="Unit (otomatis)">
             <TextInput
               value={
@@ -480,6 +518,17 @@ function DebugPanel({
 /* ========= STYLES ========= */
 const styles = StyleSheet.create({
   container: { padding: 16, gap: 14 },
+
+  backCircle: {
+    marginLeft: 12,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: "#e7f1f3",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
   fieldWrap: { gap: 8 },
   fieldLabel: { fontSize: 12, color: COLORS.sub, fontWeight: "600", marginLeft: 6 },
   pill: {
@@ -500,4 +549,3 @@ const styles = StyleSheet.create({
   },
   buttonText: { color: "#fff", fontSize: 16, fontWeight: "700" },
 });
-

@@ -15,14 +15,14 @@ const C = {
   sub: "#6b7280",
   pill: "#f3f4f6",
   border: "#e5e7eb",
-  brand: "#42909b",
+  brand: "#42909b",      // header brand color
   brandDim: "#a9d5db",
   danger: "#ef4444",
 } as const;
 
 const ENV_BASE = process.env.EXPO_PUBLIC_API_BASE;
 const DEFAULT_BASE =
-  Platform.OS === "android" ? "http://10.0.2.2:8000" : "http://192.168.43.182:8000";
+  Platform.OS === "android" ? "http://10.0.2.2:8000" : "http://localhost:8000";
 const API_BASE = ENV_BASE || DEFAULT_BASE;
 
 type Role = "siswa" | "guru";
@@ -71,6 +71,7 @@ export default function LoginRegisterScreen() {
     () => username.trim() !== "" && password.trim() !== "" && imei.trim() !== "",
     [username, password, imei]
   );
+
   const registerValid = useMemo(
     () => rUsername.trim() !== "" && rPassword.trim().length >= 6 && rUnitId.trim() !== "" && rImei.trim() !== "",
     [rUsername, rPassword, rUnitId, rImei]
@@ -84,7 +85,10 @@ export default function LoginRegisterScreen() {
 
     const displayName = user?.nama ?? user?.username ?? "Pengguna";
     const unitLabel = user?.unit_name ?? user?.unit ?? String(user?.unit_id ?? "");
-    const userObj = { id: user?.id, username: user?.username, role: user?.role, unit_id: user?.unit_id, nama: displayName, unit: unitLabel };
+    const userObj = {
+      id: user?.id, username: user?.username, role: user?.role,
+      unit_id: user?.unit_id, nama: displayName, unit: unitLabel
+    };
 
     await AsyncStorage.multiSet([
       ["auth.token", accessToken],
@@ -112,7 +116,9 @@ export default function LoginRegisterScreen() {
       const raw = await res.text();
       let json: any = null;
       try { json = JSON.parse(raw); } catch { throw new Error("Format respons server tidak valid."); }
-      if (!res.ok || json?.status !== "success") throw new Error(json?.message || `Login gagal (HTTP ${res.status})`);
+      if (!res.ok || json?.status !== "success") {
+        throw new Error(json?.message || `Login gagal (HTTP ${res.status})`);
+      }
       await persistAndGo(json);
     } catch (e: any) {
       setErrLogin(e?.message || "Terjadi kesalahan saat login.");
@@ -169,44 +175,83 @@ export default function LoginRegisterScreen() {
     }
   };
 
-  // ===== UI =====
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: C.bg }}>
-      <View style={s.debug}>
-        <Text style={s.debugTxt}>login.tsx • {API_BASE} • {new Date().toLocaleTimeString()}</Text>
+      {/* ===== Header kustom: warna brand + tombol back kotak ===== */}
+      <View style={s.header}>
+        <TouchableOpacity
+          onPress={() => router.back()}
+          style={s.backBox}
+          activeOpacity={0.7}
+        >
+          <Ionicons
+            name={Platform.OS === "ios" ? "chevron-back" : "arrow-back"}
+            size={18}
+            color="#000"
+          />
+        </TouchableOpacity>
+        <Text style={s.headerTitle}>Masuk</Text>
+        <View style={{ width: 40 }} />
       </View>
 
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
         <ScrollView contentContainerStyle={s.scroll} keyboardShouldPersistTaps="handled">
-          {/* Judul */}
           <View style={s.hero}>
             <Text style={s.appTitle}>SIMATA</Text>
             <Text style={s.appSubtitle}>Sistem Informasi Permata</Text>
           </View>
 
-          {/* LOGIN FORM */}
           <View style={s.form}>
             <View style={s.pill}>
               <Ionicons name="person-outline" size={18} color={C.sub} style={s.icon} />
-              <TextInput style={s.input} value={username} onChangeText={setUsername} placeholder="Username" placeholderTextColor={C.sub} autoCapitalize="none" />
+              <TextInput
+                style={s.input}
+                value={username}
+                onChangeText={setUsername}
+                placeholder="Username"
+                placeholderTextColor={C.sub}
+                autoCapitalize="none"
+              />
             </View>
+
             <View style={s.pill}>
               <Ionicons name="lock-closed-outline" size={18} color={C.sub} style={s.icon} />
-              <TextInput style={s.input} value={password} onChangeText={setPassword} placeholder="Password" placeholderTextColor={C.sub} autoCapitalize="none" secureTextEntry={!showPass} />
+              <TextInput
+                style={s.input}
+                value={password}
+                onChangeText={setPassword}
+                placeholder="Password"
+                placeholderTextColor={C.sub}
+                autoCapitalize="none"
+                secureTextEntry={!showPass}
+              />
               <TouchableOpacity onPress={() => setShowPass(v => !v)}>
                 <Ionicons name={showPass ? "eye-off-outline" : "eye-outline"} size={18} color={C.sub} />
               </TouchableOpacity>
             </View>
+
             <View style={s.pill}>
               <Ionicons name="phone-portrait-outline" size={18} color={C.sub} style={s.icon} />
-              <TextInput style={s.input} value={imei} onChangeText={setImei} placeholder="IMEI / ANDROID_ID" placeholderTextColor={C.sub} />
+              <TextInput
+                style={s.input}
+                value={imei}
+                onChangeText={setImei}
+                placeholder="IMEI / ANDROID_ID"
+                placeholderTextColor={C.sub}
+              />
             </View>
+
             {errLogin ? <Text style={s.errText}>{errLogin}</Text> : null}
-            <TouchableOpacity style={[s.primaryBtn, (!loginValid || loadingLogin) && { backgroundColor: C.brandDim }]} disabled={!loginValid || loadingLogin} onPress={handleLogin} activeOpacity={0.9}>
+
+            <TouchableOpacity
+              style={[s.primaryBtn, (!loginValid || loadingLogin) && { backgroundColor: C.brandDim }]}
+              disabled={!loginValid || loadingLogin}
+              onPress={handleLogin}
+              activeOpacity={0.9}
+            >
               {loadingLogin ? <ActivityIndicator color="#fff" /> : <Text style={s.primaryText}>Login</Text>}
             </TouchableOpacity>
 
-            {/* Link ke Register Modal */}
             <TouchableOpacity onPress={() => setShowRegModal(true)} style={{ marginTop: 16 }} activeOpacity={0.8}>
               <Text style={{ textAlign: "center", color: C.text, fontWeight: "700" }}>
                 Belum punya akun? <Text style={{ color: C.brand }}>Daftar →</Text>
@@ -228,6 +273,7 @@ export default function LoginRegisterScreen() {
             <Text style={s.modalTitle}>Daftar Akun</Text>
             <View style={{ width: 40 }} />
           </View>
+
           <ScrollView contentContainerStyle={s.scroll} keyboardShouldPersistTaps="handled">
             <RegisterForm
               rUsername={rUsername} setRUsername={setRUsername}
@@ -247,15 +293,7 @@ export default function LoginRegisterScreen() {
   );
 }
 
-function RegisterForm({
-  rUsername, setRUsername,
-  rPassword, setRPassword,
-  rRole, setRRole,
-  rUnitId, setRUnitId,
-  rImei, setRImei,
-  loadingReg, registerValid,
-  onSubmit, onBackToLogin,
-}: any) {
+function RegisterForm({ rUsername, setRUsername, rPassword, setRPassword, rRole, setRRole, rUnitId, setRUnitId, rImei, setRImei, loadingReg, registerValid, onSubmit, onBackToLogin }: any) {
   return (
     <View style={s.form}>
       <Text style={s.label}>Username</Text>
@@ -297,23 +335,43 @@ function RegisterForm({
 }
 
 const s = StyleSheet.create({
-  debug: { backgroundColor: "#FFF3CD", paddingVertical: 6, paddingHorizontal: 12, borderBottomWidth: 1, borderColor: "#FDE68A" },
-  debugTxt: { color: "#7C5B00", fontSize: 12, textAlign: "center" },
+  // Header
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: C.brand,
+    paddingHorizontal: 16,
+    paddingTop: Platform.select({ ios: 8, android: 10, default: 10 }),
+    paddingBottom: 12,
+    gap: 12,
+  },
+  backBox: {
+    width: 40,
+    height: 32,
+    borderRadius: 6,           // ← kotak (bukan bulat)
+    backgroundColor: "#e7f1f3",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  headerTitle: {
+    flex: 1,
+    color: "#fff",
+    fontSize: 18,
+    fontWeight: "800",
+  },
 
+  // Body
   scroll: { paddingHorizontal: 24, paddingTop: 24, paddingBottom: 48, backgroundColor: C.bg },
   hero: { alignItems: "center", marginBottom: 12 },
   appTitle: { fontSize: 28, fontWeight: "900", letterSpacing: 1, color: C.text },
   appSubtitle: { color: C.sub, marginTop: 4 },
-
   form: { marginTop: 8 },
   pill: { flexDirection: "row", alignItems: "center", backgroundColor: C.pill, borderRadius: 999, paddingHorizontal: 16, paddingVertical: 12, marginBottom: 12 },
   icon: { marginRight: 8 },
   input: { flex: 1, color: C.text, fontSize: 14 },
   errText: { color: C.danger, textAlign: "center", marginBottom: 8 },
-
   primaryBtn: { backgroundColor: C.brand, borderRadius: 999, paddingVertical: 14, alignItems: "center", marginTop: 6 },
   primaryText: { color: "#fff", fontWeight: "800", fontSize: 16 },
-
   label: { fontSize: 12, color: C.sub, fontWeight: "700", marginTop: 6, marginBottom: 6 },
   inputBox: { borderWidth: 1, borderColor: C.border, borderRadius: 12, paddingVertical: 12, paddingHorizontal: 12, color: C.text, backgroundColor: "#fff", marginBottom: 8 },
   segment: { flexDirection: "row", gap: 8, marginBottom: 8 },
@@ -322,7 +380,8 @@ const s = StyleSheet.create({
   segmentText: { color: C.text, fontWeight: "700" },
   segmentTextActive: { color: "#fff" },
 
+  // Modal
   modalHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderColor: C.border, backgroundColor: "#fff" },
-  modalClose: { width: 40, height: 40, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: C.pill },
+  modalClose: { width: 40, height: 40, borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: C.pill }, // kotak rounded
   modalTitle: { fontSize: 16, fontWeight: "800", color: C.text },
 });

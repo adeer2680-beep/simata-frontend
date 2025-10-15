@@ -9,9 +9,11 @@ import {
   StyleSheet,
   Text,
   View,
+  TouchableOpacity,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { Ionicons } from "@expo/vector-icons";
 
 const API_URL = "https://equran.id/api/v2/surat";
 const CACHE_KEY = "@equran/surah_list_v2";
@@ -29,19 +31,13 @@ type Surah = {
   audioFull?: Record<string, string>;
 };
 
-type ApiResp = {
-  code: number;
-  message: string;
-  data: Surah[];
-};
-
+type ApiResp = { code: number; message: string; data: Surah[] };
 type CacheShape = { data: Surah[]; ts: number };
 
 // ---------- Utilities sinkronisasi ----------
 function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
 }
-
 async function fetchWithTimeout(url: string, opts: RequestInit = {}, timeoutMs = TIMEOUT_MS) {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeoutMs);
@@ -54,7 +50,6 @@ async function fetchWithTimeout(url: string, opts: RequestInit = {}, timeoutMs =
     throw e;
   }
 }
-
 function formatClock(ts?: number | null) {
   if (!ts) return "—";
   const d = new Date(ts);
@@ -71,20 +66,18 @@ export default function SurahListScreen() {
   const [error, setError] = useState<string | null>(null);
 
   // status sinkronisasi
-  const [isStale, setIsStale] = useState(false);      // true bila yang ditampilkan dari cache lama
+  const [isStale, setIsStale] = useState(false);
   const [lastSyncAt, setLastSyncAt] = useState<number | null>(null);
-  const [syncing, setSyncing] = useState(false);      // guard agar tidak double-load
+  const [syncing, setSyncing] = useState(false);
 
   // Load sinkronis: retry + timeout + cache
   const load = useCallback(async () => {
-    if (syncing) return; // cegah paralel
+    if (syncing) return;
     setSyncing(true);
     setError(null);
-    // jika ini load awal (bukan pull-to-refresh), tampilkan spinner utama
     if (data.length === 0) setLoading(true);
 
     try {
-      // 1) Coba fetch dengan retry eksponensial
       let lastErr: any = null;
       for (let attempt = 1; attempt <= RETRIES; attempt++) {
         try {
@@ -94,7 +87,6 @@ export default function SurahListScreen() {
           if (json?.code !== 200 || !Array.isArray(json?.data)) {
             throw new Error(json?.message || "Format API tidak sesuai");
           }
-          // sukses → set data, simpan cache
           setData(json.data);
           setIsStale(false);
           const now = Date.now();
@@ -104,13 +96,11 @@ export default function SurahListScreen() {
           break;
         } catch (e: any) {
           lastErr = e;
-          // backoff: 600ms, 1200ms, ...
           const backoff = 600 * attempt;
           await sleep(backoff);
         }
       }
 
-      // 2) Jika tetap gagal setelah retry → coba tarik dari cache
       if (lastErr) {
         const cached = await AsyncStorage.getItem(CACHE_KEY);
         if (cached) {
@@ -124,7 +114,6 @@ export default function SurahListScreen() {
         }
       }
     } catch (e: any) {
-      // error tak terduga → coba cache juga
       const cached = await AsyncStorage.getItem(CACHE_KEY);
       if (cached) {
         const parsed: CacheShape = JSON.parse(cached);
@@ -181,10 +170,24 @@ export default function SurahListScreen() {
   }
 
   return (
-    <SafeAreaView style={styles.fill} edges={["left", "right", "bottom"]}>
+    <SafeAreaView style={styles.fill} edges={["left", "right", "bottom", "top"]}>
       <Stack.Screen options={{ headerShown: false }} />
 
+      {/* ===== Header kustom: warna #42909b + tombol back bulat ===== */}
       <View style={styles.headerWrap}>
+        <TouchableOpacity
+          onPress={() => router.back()}
+          style={styles.backCircle}
+          activeOpacity={0.7}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <Ionicons
+            name={Platform.OS === "ios" ? "chevron-back" : "arrow-back"}
+            size={18}
+            color="#000"
+          />
+        </TouchableOpacity>
+
         <View style={{ flex: 1 }}>
           <Text style={styles.headerTitle}>Daftar Surah</Text>
           <Text style={styles.headerSub}>
@@ -193,16 +196,16 @@ export default function SurahListScreen() {
         </View>
 
         <Pressable
-          style={[styles.btnMini, syncing && { opacity: 0.6 }]}
+          style={[styles.btnSync, syncing && { opacity: 0.6 }]}
           onPress={load}
           disabled={syncing}
           android_ripple={{ color: "#d1f4f2" }}
         >
-          <Text style={styles.btnMiniText}>{syncing ? "Sinkron…" : "Sinkronkan"}</Text>
+          <Text style={styles.btnSyncText}>{syncing ? "Sinkron…" : "Sinkronkan"}</Text>
         </Pressable>
       </View>
 
-      {/* Banner status bila data stale / ada error namun ada cache */}
+      {/* Banner status bila data stale / error tapi ada cache */}
       {(isStale || (error && data.length > 0)) && (
         <View style={styles.banner}>
           <Text style={styles.bannerText}>
@@ -258,52 +261,73 @@ function SurahCard({ item }: { item: Surah }) {
   );
 }
 
+const BRAND = "#42909b";
+
 const styles = StyleSheet.create({
   fill: { flex: 1, backgroundColor: "#f8fafc" },
   center: { alignItems: "center", justifyContent: "center" },
 
+  // HEADER
   headerWrap: {
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
     paddingHorizontal: 16,
-    paddingTop: Platform.select({ ios: 6, android: 8, default: 10 }),
-    paddingBottom: 8,
-    backgroundColor: "#f8fafc",
+    paddingTop: Platform.select({ ios: 8, android: 10, default: 10 }),
+    paddingBottom: 10,
+    backgroundColor: BRAND,
+  },
+  backCircle: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: "#e7f1f3",
+    alignItems: "center",
+    justifyContent: "center",
   },
   headerTitle: {
     fontSize: 20,
     fontWeight: "800",
-    color: "#0f172a",
+    color: "#fff",
   },
   headerSub: {
-    color: "#64748b",
+    color: "#f1f5f9",
     marginTop: 2,
     fontWeight: "600",
     fontSize: 12,
+    opacity: 0.95,
   },
+  btnSync: {
+    backgroundColor: "#e7f1f3",
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#ffffff55",
+  },
+  btnSyncText: { color: "#0f172a", fontWeight: "800", fontSize: 12 },
 
+  // BANNER
   banner: {
     marginHorizontal: 16,
+    marginTop: 8,
     marginBottom: 6,
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 12,
-    backgroundColor: "#fff7ed", // amber-50
+    backgroundColor: "#fff7ed",
     borderWidth: 1,
-    borderColor: "#ffedd5", // amber-100
+    borderColor: "#ffedd5",
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     gap: 10,
   },
-  bannerText: { color: "#9a3412", fontSize: 12, fontWeight: "700" }, // amber-800
-  bannerLink: { color: "#0ea5a3", fontSize: 12, fontWeight: "800" },
+  bannerText: { color: "#9a3412", fontSize: 12, fontWeight: "700" },
+  bannerLink: { color: BRAND, fontSize: 12, fontWeight: "800" },
 
-  listContent: {
-    paddingHorizontal: 16,
-    paddingTop: 8,
-  },
+  // LIST
+  listContent: { paddingHorizontal: 16, paddingTop: 8 },
   card: {
     flexDirection: "row",
     gap: 12,
@@ -318,9 +342,7 @@ const styles = StyleSheet.create({
         shadowRadius: 10,
         shadowOffset: { width: 0, height: 6 },
       },
-      android: {
-        elevation: 2,
-      },
+      android: { elevation: 2 },
       default: {},
     }),
   },
@@ -330,48 +352,27 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#0ea5a311",
+    backgroundColor: `${BRAND}11`,
     borderWidth: 1,
-    borderColor: "#0ea5a333",
+    borderColor: `${BRAND}33`,
   },
-  noText: { color: "#0ea5a3", fontWeight: "800" },
-  namaArab: {
-    fontSize: 18,
-    color: "#0f172a",
-    fontWeight: "800",
-    textAlign: "left",
-  },
-  namaLatin: {
-    fontSize: 13,
-    color: "#0f172a",
-    fontWeight: "700",
-    marginTop: 2,
-  },
-  meta: {
-    fontSize: 12,
-    color: "#64748b",
-    fontWeight: "600",
-    marginTop: 4,
-  },
+  noText: { color: BRAND, fontWeight: "800" },
+  namaArab: { fontSize: 18, color: "#0f172a", fontWeight: "800", textAlign: "left" },
+  namaLatin: { fontSize: 13, color: "#0f172a", fontWeight: "700", marginTop: 2 },
+  meta: { fontSize: 12, color: "#64748b", fontWeight: "600", marginTop: 4 },
+
+  // MISC
   loadingText: { marginTop: 8, color: "#0f172a", fontWeight: "600" },
   errTitle: { fontSize: 18, fontWeight: "800", color: "#0f172a" },
   errSub: { color: "#64748b", marginTop: 6, textAlign: "center" },
 
   btn: {
-    backgroundColor: "#0ea5a3",
+    backgroundColor: BRAND,
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderRadius: 12,
   },
   btnText: { color: "#fff", fontWeight: "800" },
 
-  btnMini: {
-    backgroundColor: "#ccfbf1", // teal-100
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: "#99f6e4", // teal-200
-  },
-  btnMiniText: { color: "#0f766e", fontWeight: "800", fontSize: 12 },
+  // (btnMini lama diganti dengan btnSync khusus header)
 });

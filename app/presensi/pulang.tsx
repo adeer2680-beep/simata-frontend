@@ -1,4 +1,4 @@
-// app/presensi-pulang.tsx
+// app/presensi/pulang.tsx
 import React, { useEffect, useMemo, useState } from "react";
 import {
   View,
@@ -12,21 +12,19 @@ import {
   ScrollView,
   ActivityIndicator,
 } from "react-native";
-import { Stack } from "expo-router";
+import { Stack, router } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { Ionicons } from "@expo/vector-icons";
 
+/* ========= UI ========= */
 const COLORS = {
   bg: "#ffffff",
   text: "#0f172a",
   sub: "#475569",
-  brand: "#0ea5a3",
+  brand: "#42909b", // ← ganti warna header
   border: "#e5e7eb",
+  danger: "#ef4444",
 };
-
-const API_BASE =
-  Platform.OS === "android"
-    ? "http://192.168.1.123:8000/api" // ← GANTI ke IP LAN PC yang menjalankan Laravel
-    : "http://localhost:8000/api";
 
 const fmtDate = (d = new Date()) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
@@ -34,166 +32,272 @@ const fmtDate = (d = new Date()) =>
   ).padStart(2, "0")}`;
 
 const fmtTime = (d = new Date()) =>
-  `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(
-    2,
-    "0"
-  )}`;
+  `${String(d.getHours()).padStart(2, "0")}:${String(
+    d.getMinutes()
+  ).padStart(2, "0")}`;
 
-type Unit = { id: number; nama: string };
+/* ========= KONFIG API ========= */
+const LAN_IP = "192.168.43.182"; // ganti sesuai IP LAN kamu
+const USE_ANDROID_EMULATOR = true;
+
+const HOST =
+  Platform.OS === "android"
+    ? (USE_ANDROID_EMULATOR ? "10.0.2.2" : LAN_IP)
+    : LAN_IP;
+
+const API_BASE = `http://localhost:8000/api`;
+const PRESENSI_URL = `${API_BASE}/presensi`;
+
+/* ========= TIPE DATA ========= */
+type AuthUser = {
+  id?: number | string;
+  username?: string;
+  role?: string;
+  unit_id?: number | string;
+  nama?: string;
+  unit?: string;
+};
 
 export default function PresensiPulang() {
-  // FE fields
-  const [jenis, setJenis] = useState("Kegiatan Harian"); // bebas ubah default
-  const [unitId, setUnitId] = useState<number | null>(null);
+  // default jenis boleh diubah sesuai kebutuhan
+  const [jenis, setJenis] = useState("Kegiatan Harian");
   const [tanggal, setTanggal] = useState(fmtDate());
   const [waktu, setWaktu] = useState(fmtTime());
   const [jarak, setJarak] = useState("");
 
-  // meta
-  const [units, setUnits] = useState<Unit[]>([]);
-  const [loadingUnits, setLoadingUnits] = useState(true);
+  // auto dari sesi login.tsx
+  const [displayName, setDisplayName] = useState<string>("");
+  const [unitLabel, setUnitLabel] = useState<string>("");
+  const [unitId, setUnitId] = useState<number | null>(null);
+
+  // auth
+  const [token, setToken] = useState<string | null>(null);
+  const [tokenType, setTokenType] = useState<string>("Bearer");
+
+  // status
+  const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
-  // segarkan waktu tiap 30 detik
+  // segarkan waktu per 30 detik
   useEffect(() => {
     const id = setInterval(() => setWaktu(fmtTime()), 30_000);
     return () => clearInterval(id);
   }, []);
 
-  // fetch units untuk dropdown
+  // baca sesi seperti login.tsx
   useEffect(() => {
     (async () => {
       try {
-        const token = await AsyncStorage.getItem("access_token");
-        const res = await fetch(`${API_BASE}/units`, {
-          headers: {
-            Accept: "application/json",
-            Authorization: token ? `Bearer ${token}` : "",
-          },
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data?.message || "Gagal mengambil unit");
-        setUnits(data);
-        if (data?.length && unitId === null) setUnitId(data[0].id);
+        const [[, t], [, ttype], [, u], [, beranda]] = await AsyncStorage.multiGet([
+          "auth.token",
+          "auth.tokenType",
+          "auth.user",
+          "auth.beranda",
+        ]);
+
+        if (t) setToken(t);
+        if (ttype) setTokenType(ttype || "Bearer");
+
+        let parsed: AuthUser | null = null;
+        if (u) {
+          try {
+            parsed = JSON.parse(u);
+          } catch {
+            parsed = null;
+          }
+        }
+
+        const nameFromUser = (parsed?.nama ?? parsed?.username ?? "Pengguna") + "";
+        const unitFromUser = (parsed?.unit ?? String(parsed?.unit_id ?? "")) + "";
+
+        setDisplayName(nameFromUser);
+        setUnitLabel(unitFromUser);
+
+        if (parsed?.unit_id != null && parsed.unit_id !== "") {
+          const n = Number(parsed.unit_id);
+          setUnitId(isNaN(n) ? null : n);
+        } else {
+          setUnitId(null);
+        }
+
+        if (!nameFromUser && beranda) {
+          setDisplayName(beranda.split("•")[0].trim());
+        }
       } catch (e: any) {
-        Alert.alert("Gagal", e?.message ?? "Gagal memuat daftar unit");
+        console.log("Load session error:", e?.message ?? e);
       } finally {
-        setLoadingUnits(false);
+        setLoading(false);
       }
     })();
   }, []);
 
   const canSubmit = useMemo(
-    () => jenis && unitId && tanggal && waktu,
-    [jenis, unitId, tanggal, waktu]
+    () => Boolean(jenis && tanggal && waktu && unitId && token),
+    [jenis, tanggal, waktu, unitId, token]
   );
 
   const onSubmit = async () => {
     if (!canSubmit) {
-      Alert.alert("Lengkapi Data", "Harap isi Jenis, Unit, Tanggal, dan Waktu.");
+      Alert.alert(
+        "Lengkapi Data",
+        !token
+          ? "Token login tidak ditemukan. Silakan login ulang."
+          : !unitId
+          ? "Unit belum terdeteksi dari sesi. Pastikan akun punya unit_id."
+          : "Harap isi Jenis, Tanggal, dan Waktu."
+      );
       return;
     }
+
+    setSubmitting(true);
     try {
-      setSubmitting(true);
-
-      const token = await AsyncStorage.getItem("access_token");
-      if (!token) {
-        Alert.alert("Auth", "Silakan login ulang. Token tidak ditemukan.");
-        return;
-      }
-
-      // Timeout pakai AbortController
-      const controller = new AbortController();
-      const t = setTimeout(() => controller.abort(), 15000);
-
-      const payload = {
+      // ⚠️ Jangan kirim 'status': backend menentukan otomatis (datang/pulang)
+      const payload: Record<string, any> = {
         unit_id: unitId,
         jenis_presensi: jenis,
         tanggal,
         waktu,
-        jarak: jarak ? Number(jarak) : null,
-        status: "pulang", // ⟵ PERBEDAAN UTAMA (dibanding screen “datang”)
       };
+      if (jarak.trim().length > 0 && !isNaN(Number(jarak))) {
+        payload.jarak = Number(jarak);
+      }
 
-      const res = await fetch(`${API_BASE}/presensi`, {
+      const res = await fetch(PRESENSI_URL, {
         method: "POST",
         headers: {
-          Accept: "application/json",
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
+          Accept: "application/json",
+          Authorization: `${tokenType || "Bearer"} ${token}`,
         },
         body: JSON.stringify(payload),
-        signal: controller.signal,
       });
 
-      clearTimeout(t);
-      const data = await res.json();
+      const text = await res.text();
+      let json: any = null;
+      try {
+        json = JSON.parse(text);
+      } catch {}
 
-      if (!res.ok) {
+      if (res.status === 201) {
         const msg =
-          typeof data?.message === "string"
-            ? data.message
-            : data?.errors
-            ? Object.values(data.errors).flat().join("\n")
-            : "Gagal menyimpan presensi";
-        throw new Error(msg);
-      }
-
-      Alert.alert("Berhasil", "Presensi pulang tercatat.");
-    } catch (e: any) {
-      if (e?.name === "AbortError") {
-        Alert.alert("Timeout", "Server tidak merespons. Coba lagi.");
+          json?.message ??
+          `Presensi berhasil disimpan${
+            json?.data?.status ? ` (${json.data.status})` : ""
+          }.`;
+        Alert.alert("Sukses", msg);
+        setJarak("");
+        setJenis("Kegiatan Harian");
       } else {
-        Alert.alert("Gagal", e?.message ?? "Network request failed");
+        console.log("Presensi pulang gagal:", res.status, json ?? text);
       }
+    } catch (e: any) {
+      console.log("SUBMIT error (pulang):", e?.message ?? e);
     } finally {
       setSubmitting(false);
     }
   };
 
+  if (loading) {
+    return (
+      <>
+        {/* Header: warna + tombol back bulat */}
+        <Stack.Screen
+          options={{
+            title: "Presensi Pulang",
+            headerStyle: { backgroundColor: COLORS.brand },
+            headerTitleStyle: { color: "#fff", fontWeight: "800" },
+            headerTitleAlign: "center",
+            headerShadowVisible: false,
+            headerLeft: () => (
+              <TouchableOpacity
+                onPress={() => router.back()}
+                style={styles.backCircle}
+                activeOpacity={0.7}
+              >
+                <Ionicons
+                  name={Platform.OS === "ios" ? "chevron-back" : "arrow-back"}
+                  size={18}
+                  color="#000"
+                />
+              </TouchableOpacity>
+            ),
+          }}
+        />
+        <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
+          <ActivityIndicator size="large" />
+          <Text style={{ marginTop: 8, color: COLORS.sub }}>Memuat sesi…</Text>
+        </View>
+      </>
+    );
+  }
+
   return (
     <>
-      <Stack.Screen options={{ title: "Presensi Pulang" }} />
+      {/* Header: warna #42909b + tombol back bulat */}
+      <Stack.Screen
+        options={{
+          title: "Presensi Pulang",
+          headerStyle: { backgroundColor: COLORS.brand },
+          headerTitleStyle: { color: "#fff", fontWeight: "800" },
+          headerTitleAlign: "center",
+          headerShadowVisible: false,
+          headerLeft: () => (
+            <TouchableOpacity
+              onPress={() => router.back()}
+              style={styles.backCircle}
+              activeOpacity={0.7}
+            >
+              <Ionicons
+                name={Platform.OS === "ios" ? "chevron-back" : "arrow-back"}
+                size={18}
+                color="#000"
+              />
+            </TouchableOpacity>
+          ),
+        }}
+      />
+
       <KeyboardAvoidingView
         behavior={Platform.OS === "ios" ? "padding" : undefined}
         style={{ flex: 1, backgroundColor: COLORS.bg }}
       >
         <ScrollView contentContainerStyle={styles.container}>
+          {/* Jenis Presensi (editable) */}
           <Field label="Jenis Presensi">
             <TextInput
               value={jenis}
               onChangeText={setJenis}
-              placeholder="Jenis Presensi"
+              placeholder="cth: Kegiatan Harian / Mengajar / Rapat"
               style={styles.input}
               placeholderTextColor={COLORS.sub}
             />
           </Field>
 
-          <Field label="Unit">
-            {loadingUnits ? (
-              <View style={{ paddingVertical: 8 }}>
-                <ActivityIndicator />
-              </View>
-            ) : units.length ? (
-              <View style={{ gap: 8 }}>
-                {units.map((u) => (
-                  <TouchableOpacity
-                    key={u.id}
-                    onPress={() => setUnitId(u.id)}
-                    style={[
-                      styles.option,
-                      unitId === u.id && { borderColor: COLORS.brand, borderWidth: 2 },
-                    ]}
-                  >
-                    <Text style={styles.input}>{u.nama}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            ) : (
-              <Text style={{ color: COLORS.sub }}>Tidak ada unit.</Text>
-            )}
+          {/* Nama (otomatis) */}
+          <Field label="Nama (otomatis)">
+            <TextInput
+              value={displayName}
+              editable={false}
+              style={[styles.input, { color: "#64748b" }]}
+            />
           </Field>
 
+          {/* Unit (otomatis) */}
+          <Field label="Unit (otomatis)">
+            <TextInput
+              value={
+                unitLabel
+                  ? `${unitLabel}${unitId ? ` (ID: ${unitId})` : ""}`
+                  : unitId
+                  ? `ID: ${unitId}`
+                  : "-"
+              }
+              editable={false}
+              style={[styles.input, { color: "#64748b" }]}
+            />
+          </Field>
+
+          {/* Tanggal */}
           <Field label="Tanggal">
             <TextInput
               value={tanggal}
@@ -204,6 +308,7 @@ export default function PresensiPulang() {
             />
           </Field>
 
+          {/* Waktu */}
           <Field label="Waktu">
             <TextInput
               value={waktu}
@@ -214,11 +319,12 @@ export default function PresensiPulang() {
             />
           </Field>
 
+          {/* Jarak (opsional) */}
           <Field label="Jarak (opsional)">
             <TextInput
               value={jarak}
               onChangeText={setJarak}
-              placeholder="Jarak (km)"
+              placeholder="Jarak ke lokasi (km)"
               keyboardType="decimal-pad"
               style={styles.input}
               placeholderTextColor={COLORS.sub}
@@ -232,7 +338,7 @@ export default function PresensiPulang() {
             disabled={!canSubmit || submitting}
           >
             <Text style={styles.buttonText}>
-              {submitting ? "Menyimpan..." : "Submit Presensi Pulang"}
+              {submitting ? "Menyimpan..." : "Submit"}
             </Text>
           </TouchableOpacity>
         </ScrollView>
@@ -252,13 +358,19 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 const styles = StyleSheet.create({
   container: { padding: 16, gap: 14 },
-  fieldWrap: { gap: 8 },
-  fieldLabel: {
-    fontSize: 12,
-    color: COLORS.sub,
-    fontWeight: "600",
-    marginLeft: 6,
+
+  backCircle: {
+    marginLeft: 12,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: "#e7f1f3",
+    alignItems: "center",
+    justifyContent: "center",
   },
+
+  fieldWrap: { gap: 8 },
+  fieldLabel: { fontSize: 12, color: COLORS.sub, fontWeight: "600", marginLeft: 6 },
   pill: {
     backgroundColor: "#f1f5f9",
     borderRadius: 16,
@@ -268,14 +380,6 @@ const styles = StyleSheet.create({
     borderColor: COLORS.border,
   },
   input: { fontSize: 16, color: COLORS.text },
-  option: {
-    backgroundColor: "#fff",
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-  },
   button: {
     marginTop: 8,
     backgroundColor: COLORS.brand,

@@ -18,11 +18,9 @@ const COLORS = {
   card: "#f3f4f6",
   text: "#0f172a",
   sub: "#475569",
-  brand: "#42909b",          // ⬅️ samakan dengan warna header gambar kedua
+  brand: "#42909b",
   border: "#e5e7eb",
   shadow: "#00000020",
-
-  // modal
   modalBg: "#42909b",
   modalDivider: "#62aeb7",
 };
@@ -56,42 +54,44 @@ export default function PresensiHome() {
 
   return (
     <View style={styles.container}>
-      {/* ===== Header bar berwarna (expo-router) ===== */}
       <Stack.Screen
         options={{
           title: "Presensi",
           headerStyle: { backgroundColor: COLORS.brand },
-          headerTintColor: "#fff",
           headerTitleStyle: { color: "#fff", fontWeight: "800" },
+          headerTitleAlign: "center",
           headerShadowVisible: false,
-          // Web kadang tidak mewarisi warna ikon; paksa putih:
-          headerBackVisible: true,
+          headerLeft: () => (
+            <View style={{ marginLeft: 12 }}>
+              <TouchableOpacity
+                onPress={() => router.back()}
+                style={styles.backBtn}
+                activeOpacity={0.7}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Ionicons
+                  name={Platform.OS === "ios" ? "chevron-back" : "arrow-back"}
+                  size={18}
+                  color="#000"
+                />
+              </TouchableOpacity>
+            </View>
+          ),
         }}
       />
 
-      {/* Selector (open modal) */}
+      {/* Selector */}
       <View style={styles.block}>
         <Text style={styles.blockTitle}>Pilih Jenis Presensi</Text>
-
-        <TouchableOpacity
-          activeOpacity={0.8}
-          style={styles.dropdown}
-          onPress={() => setOpen(true)}
-        >
-          <Text style={styles.dropdownTextValue}>
-            {selected ?? "Pilih salah satu"}
-          </Text>
+        <TouchableOpacity activeOpacity={0.8} style={styles.dropdown} onPress={() => setOpen(true)}>
+          <Text style={styles.dropdownTextValue}>{selected ?? "Pilih salah satu"}</Text>
           <Ionicons name="chevron-down" size={18} color={COLORS.sub} />
         </TouchableOpacity>
       </View>
 
       {/* Kartu aksi */}
       <View style={styles.cardsWrap}>
-        <TouchableOpacity
-          style={[styles.card, { marginRight: 12 }]}
-          activeOpacity={0.85}
-          onPress={goDatang}
-        >
+        <TouchableOpacity style={[styles.card, { marginRight: 12 }]} activeOpacity={0.85} onPress={goDatang}>
           <View style={styles.cardIconBubble}>
             <Ionicons name="clipboard-outline" size={26} color={COLORS.brand} />
           </View>
@@ -106,7 +106,7 @@ export default function PresensiHome() {
         </TouchableOpacity>
       </View>
 
-      {/* Modal list + radio */}
+      {/* Modal */}
       <Modal visible={open} animationType="slide" transparent onRequestClose={() => setOpen(false)}>
         <Pressable style={styles.backdrop} onPress={() => setOpen(false)} />
         <View style={styles.sheet}>
@@ -151,7 +151,19 @@ export default function PresensiHome() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg, padding: 16 },
 
-  // blok selector
+  backBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: "#e7f1f3",
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#000",
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+
   block: {
     backgroundColor: COLORS.soft,
     borderRadius: 16,
@@ -181,7 +193,6 @@ const styles = StyleSheet.create({
   },
   dropdownTextValue: { color: COLORS.text, fontSize: 14, fontWeight: "700" },
 
-  // kartu aksi
   cardsWrap: {
     backgroundColor: COLORS.bg,
     borderRadius: 16,
@@ -213,7 +224,6 @@ const styles = StyleSheet.create({
   },
   cardLabel: { textAlign: "center", color: COLORS.text, fontWeight: "700" },
 
-  // modal
   backdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.35)" },
   sheet: {
     position: "absolute",
