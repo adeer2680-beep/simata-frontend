@@ -15,14 +15,7 @@ import {
 } from "react-native";
 
 // ==== Config API ====
-const API_BASE_URL = "http://localhost:8000";
-const API_ENDPOINT = "/videos";
-
-console.log("=== API CONFIG ===");
-console.log("Base URL:", API_BASE_URL);
-console.log("Endpoint:", API_ENDPOINT);
-console.log("Full URL:", API_BASE_URL + API_ENDPOINT);
-console.log("==================");
+const API_BASE_URL = "http://localhost:8000/api";
 
 // ==== Types ====
 type YTVideo = {
@@ -37,7 +30,7 @@ type YTVideo = {
   tags: string[];
 };
 
-// ==== Utils: parse ID & thumbnail YouTube ====
+// ==== Utils ====
 function parseYoutubeId(input: string): string | null {
   try {
     const u = new URL(input);
@@ -53,7 +46,7 @@ function parseYoutubeId(input: string): string | null {
   }
 }
 
-function makeThumbnail(id: string, quality: "hq" = "hq") {
+function makeThumbnail(id: string, quality: "hq" | "mq" = "hq") {
   const url = `https://img.youtube.com/vi/${id}/${quality}default.jpg`;
   return { url, width: 480, height: 360 };
 }
@@ -63,8 +56,7 @@ function formatDuration(sec?: number | null) {
   const h = Math.floor(sec / 3600);
   const m = Math.floor((sec % 3600) / 60);
   const s = sec % 60;
-  if (h)
-    return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  if (h) return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
@@ -72,19 +64,14 @@ function formatViews(n?: number | null) {
   if (n == null) return "—";
   if (n < 1000) return `${n}`;
   if (n < 1_000_000) return `${(n / 1000).toFixed(1)}k`.replace(".0", "");
-  if (n < 1_000_000_000)
-    return `${(n / 1_000_000).toFixed(1)}M`.replace(".0", "");
+  if (n < 1_000_000_000) return `${(n / 1_000_000).toFixed(1)}M`.replace(".0", "");
   return `${(n / 1_000_000_000).toFixed(1)}B`.replace(".0", "");
 }
 
-// Transform data dari backend ke format yang bisa digunakan frontend
 function normalizeVideo(data: any): YTVideo {
   const id = parseYoutubeId(data.youtube_url) || "";
-  const thumb = id
-    ? makeThumbnail(id)
-    : { url: "", width: 480, height: 360 };
+  const thumb = id ? makeThumbnail(id) : { url: "", width: 480, height: 360 };
 
-  // Ambil dari field yang ada di backend
   const tags = data.tags
     ? Array.isArray(data.tags)
       ? data.tags
@@ -117,14 +104,14 @@ export default function YouTubeListScreen() {
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
-  // Fetch data dari API
   const fetchVideos = async () => {
     try {
       setError(null);
       
-      console.log("🔄 Fetching dari:", `${API_BASE_URL}/api/videos`);
+      const url = `${API_BASE_URL}/videos`;
+      console.log("🔄 Fetching dari:", url);
 
-      const response = await fetch(`${API_BASE_URL}/api/videos`, {
+      const response = await fetch(url, {
         method: "GET",
         headers: {
           "Accept": "application/json",
@@ -141,17 +128,19 @@ export default function YouTubeListScreen() {
       const data = await response.json();
       console.log("✅ Data diterima:", data);
 
+      // Handle different response formats
+      let videoList = [];
       if (data.data && Array.isArray(data.data)) {
-        const normalized = data.data.map(normalizeVideo);
-        setVideos(normalized);
-        console.log("✅ Videos loaded:", normalized.length);
+        videoList = data.data;
       } else if (Array.isArray(data)) {
-        const normalized = data.map(normalizeVideo);
-        setVideos(normalized);
-        console.log("✅ Videos loaded:", normalized.length);
+        videoList = data;
       } else {
         throw new Error("Format response tidak sesuai");
       }
+
+      const normalized = videoList.map(normalizeVideo);
+      setVideos(normalized);
+      console.log("✅ Videos loaded:", normalized.length);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Gagal memuat video";
       setError(message);
@@ -177,7 +166,6 @@ export default function YouTubeListScreen() {
     });
   };
 
-  // Loading state
   if (loading) {
     return (
       <View style={styles.centerContainer}>
@@ -187,7 +175,6 @@ export default function YouTubeListScreen() {
     );
   }
 
-  // Error state
   if (error) {
     return (
       <View style={styles.centerContainer}>
@@ -199,7 +186,6 @@ export default function YouTubeListScreen() {
     );
   }
 
-  // Empty state
   if (videos.length === 0) {
     return (
       <View style={styles.centerContainer}>
@@ -238,20 +224,15 @@ export default function YouTubeListScreen() {
                 resizeMode="cover"
               />
             ) : (
-              <View
-                style={[
-                  styles.thumb,
-                  { backgroundColor: "#e2e8f0", justifyContent: "center" },
-                ]}
-              >
+              <View style={[styles.thumb, styles.thumbPlaceholder]}>
                 <Text style={styles.placeholderText}>No Image</Text>
               </View>
             )}
-            {v.durationLabel ? (
+            {v.durationLabel && (
               <View style={styles.badge}>
                 <Text style={styles.badgeText}>{v.durationLabel}</Text>
               </View>
-            ) : null}
+            )}
           </View>
 
           <View style={styles.meta}>
@@ -260,7 +241,7 @@ export default function YouTubeListScreen() {
             </Text>
             <Text style={styles.sub}>
               {formatViews(v.views)} views
-              {v.tags.length ? ` • ${v.tags.slice(0, 2).join(" · ")}` : ""}
+              {v.tags.length > 0 && ` • ${v.tags.slice(0, 2).join(" · ")}`}
             </Text>
           </View>
         </Pressable>
@@ -282,6 +263,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
     backgroundColor: "#f8fafc",
+    padding: 16,
   },
   header: {
     fontSize: 20,
@@ -338,10 +320,16 @@ const styles = StyleSheet.create({
     width: CARD_IMAGE_W,
     height: CARD_IMAGE_H,
     backgroundColor: "#e2e8f0",
+    position: "relative",
   },
   thumb: {
     width: "100%",
     height: "100%",
+  },
+  thumbPlaceholder: {
+    backgroundColor: "#e2e8f0",
+    justifyContent: "center",
+    alignItems: "center",
   },
   placeholderText: {
     color: "#94a3b8",
