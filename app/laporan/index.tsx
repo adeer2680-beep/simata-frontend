@@ -7,9 +7,12 @@ import {
   ActivityIndicator,
   ScrollView,
   TouchableOpacity,
+  Platform,
+  Alert,
 } from "react-native";
 import { Picker } from "@react-native-picker/picker";
 import { useNavigation } from "@react-navigation/native";
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const MONTHS = [
   "January", "February", "March", "April", "May", "June",
@@ -20,10 +23,22 @@ interface ReportRow {
   tanggal: string;
   datang: string;
   pulang: string;
+  keterangan?: string;
+  isIjin?: boolean;
 }
 
-// Ganti dengan URL API Anda
-const API_BASE_URL = "http://localhost:8081/api";
+const getApiBaseUrl = (): string => {
+  const LOCAL_IP = "192.168.1.100"; // Ganti sesuai IP lokal backend
+  const PORT = 8000;
+
+  if (Platform.OS === "web") {
+    return `http://localhost:${PORT}/api`;
+  } else if (Platform.OS === "android") {
+    return `http://10.0.2.2:${PORT}/api`;
+  } else {
+    return `http://${LOCAL_IP}:${PORT}/api`;
+  }
+};
 
 export default function LaporanScreen() {
   const navigation = useNavigation();
@@ -34,50 +49,158 @@ export default function LaporanScreen() {
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string>("");
 
-  // Fungsi untuk fetch data presensi
+  const API_BASE_URL = getApiBaseUrl();
+
+  // Ambil token dari AsyncStorage
+  const getAuthToken = async (): Promise<string | null> => {
+    try {
+      console.log("===== CHECKING ASYNCSTORAGE =====");
+      const allKeys = await AsyncStorage.getAllKeys();
+      console.log("All AsyncStorage keys:", allKeys);
+
+      const tokenKeys = ["auth.token", "userToken", "token", "auth_token", "access_token"];
+      for (const key of tokenKeys) {
+        const value = await AsyncStorage.getItem(key);
+        if (value) {
+          console.log(`Token found with key: ${key}`);
+          console.log(`Token length: ${value.length}`);
+          console.log(`Token preview: ${value.slice(0, 40)}...`);
+          await AsyncStorage.setItem("auth.token", value);
+          return value;
+        }
+      }
+      console.warn("⚠️ Tidak ada token ditemukan di AsyncStorage");
+      return null;
+    } catch (error) {
+      console.error("Error getting token:", error);
+      return null;
+    }
+  };
+
+  // Validasi token ke /profile
+  const validateToken = async (token: string): Promise<boolean> => {
+    try {
+      console.log("Validating token with /profile endpoint...");
+      const response = await fetch(`${API_BASE_URL}/profile`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (response.ok) {
+        const data = await response.json();
+        console.log("Token valid, User:", data?.user?.name || data?.name);
+        return true;
+      } else {
+        console.warn("Token invalid (HTTP", response.status, ")");
+        return false;
+      }
+    } catch (e) {
+      console.error("Error validating token:", e);
+      return false;
+    }
+  };
+
   const fetchPresensi = async () => {
     try {
       setLoading(true);
       setError("");
-      
-      // Format bulan: 01-12
-      const bulan = String(month + 1).padStart(2, "0");
-      
-      // Sesuaikan endpoint dengan API Anda
-      const response = await fetch(
-        `${API_BASE_URL}/presensi/laporan?bulan=${bulan}&tahun=${year}`,
-        {
-          method: "GET",
-          headers: {
-            "Content-Type": "application/json",
-            // Tambahkan token jika diperlukan
-            // "Authorization": `Bearer ${yourToken}`,
-          },
-        }
-      );
 
-      if (!response.ok) {
-        throw new Error("Gagal mengambil data presensi");
+      const token = await getAuthToken();
+
+      console.log("===== AUTH STATUS =====");
+      console.log("Token available:", token ? "✅ YES" : "❌ NO");
+
+      if (!token) {
+        setError("Silakan login terlebih dahulu untuk melihat laporan");
+        setLoading(false);
+        return;
       }
 
-      const data = await response.json();
-      
-      // Sesuaikan dengan struktur response API Anda
-      // Contoh jika response: { success: true, data: [...] }
-      const presensiData = data.data || data;
-      
-      // Transform data ke format yang sesuai
-      const formattedData: ReportRow[] = presensiData.map((item: any) => ({
-        tanggal: item.tanggal || item.date,
-        datang: item.jam_datang || item.check_in || "-",
-        pulang: item.jam_pulang || item.check_out || "-",
+      const isValid = await validateToken(token);
+      if (!isValid) {
+        setError("Token tidak valid, silakan login kembali");
+        await AsyncStorage.removeItem("auth.token");
+        setLoading(false);
+        return;
+      }
+
+      console.log("===== FETCHING DATA =====");
+      const bulan = String(month + 1).padStart(2, "0");
+      console.log("Bulan:", bulan, "Tahun:", year);
+
+      const presensiUrl = `${API_BASE_URL}/presensi/laporan?bulan=${bulan}&tahun=${year}`;
+      const ijinUrl = `${API_BASE_URL}/ijins`;
+
+      console.log("Presensi URL:", presensiUrl);
+      console.log("Ijin URL:", ijinUrl);
+
+      const headers = {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      };
+
+      // Fetch presensi
+      const presensiResponse = await fetch(presensiUrl, { headers });
+      console.log("Presensi Status:", presensiResponse.status);
+
+      let presensiData: any[] = [];
+      if (presensiResponse.ok) {
+        const data = await presensiResponse.json();
+        console.log("Presensi Response:", JSON.stringify(data, null, 2));
+        if (Array.isArray(data)) presensiData = data;
+        else if (data.data && Array.isArray(data.data)) presensiData = data.data;
+        else if (typeof data === "object") presensiData = Object.values(data);
+      } else {
+        console.warn("Presensi gagal:", await presensiResponse.text());
+      }
+
+      // Fetch ijin
+      let ijinData: any[] = [];
+      const ijinResponse = await fetch(ijinUrl, { headers });
+      console.log("Ijin Status:", ijinResponse.status);
+      if (ijinResponse.ok) {
+        const data = await ijinResponse.json();
+        console.log("Ijin Response:", JSON.stringify(data, null, 2));
+        const allIjin = Array.isArray(data)
+          ? data
+          : Array.isArray(data.data)
+          ? data.data
+          : Object.values(data);
+        ijinData = allIjin.filter((item: any) => {
+          const tgl = new Date(item.tanggal);
+          return tgl.getMonth() === month && tgl.getFullYear() === year;
+        });
+      }
+
+      const presensiRows: ReportRow[] = presensiData.map((item) => ({
+        tanggal: item.tanggal || item.date || "-",
+        datang: item.datang || item.jam_datang || item.check_in || "-",
+        pulang: item.pulang || item.jam_pulang || item.check_out || "-",
+        isIjin: false,
       }));
-      
-      setRows(formattedData);
-    } catch (err) {
-      console.error("Error fetching presensi:", err);
-      setError("Gagal memuat data presensi");
-      setRows([]);
+
+      const ijinRows: ReportRow[] = ijinData.map((item) => ({
+        tanggal: item.tanggal || item.date || "-",
+        datang: "IJIN",
+        pulang: item.keterangan || item.description || "-",
+        keterangan: item.keterangan,
+        isIjin: true,
+      }));
+
+      const allRows = [...presensiRows, ...ijinRows].sort(
+        (a, b) => new Date(a.tanggal).getTime() - new Date(b.tanggal).getTime()
+      );
+
+      console.log("===== SUMMARY =====");
+      console.log("Total Presensi:", presensiRows.length);
+      console.log("Total Ijin:", ijinRows.length);
+      console.log("Total Rows:", allRows.length);
+
+      setRows(allRows);
+      if (allRows.length === 0) setError("Tidak ada data untuk bulan dan tahun yang dipilih");
+    } catch (err: any) {
+      console.error("=== ERROR FETCHING PRESENSI ===");
+      console.error(err);
+      setError("Gagal memuat data. Pastikan Laravel API sedang berjalan di " + API_BASE_URL);
     } finally {
       setLoading(false);
     }
@@ -89,27 +212,18 @@ export default function LaporanScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity 
-          onPress={() => navigation.goBack()}
-          style={styles.backButton}
-        >
+        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
           <Text style={styles.backIcon}>←</Text>
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Laporan Presensi</Text>
       </View>
 
       <ScrollView contentContainerStyle={styles.content}>
-        {/* Dropdown Bulan/Tahun */}
         <View style={styles.dropdownRow}>
           <View style={styles.dropdownBox}>
             <Text style={styles.dropdownLabel}>Bulan</Text>
-            <Picker
-              selectedValue={month}
-              onValueChange={(v) => setMonth(Number(v))}
-              style={styles.picker}
-            >
+            <Picker selectedValue={month} onValueChange={(v) => setMonth(Number(v))} style={styles.picker}>
               {MONTHS.map((m, i) => (
                 <Picker.Item key={m} label={m} value={i} />
               ))}
@@ -118,11 +232,7 @@ export default function LaporanScreen() {
 
           <View style={styles.dropdownBox}>
             <Text style={styles.dropdownLabel}>Tahun</Text>
-            <Picker
-              selectedValue={year}
-              onValueChange={(v) => setYear(Number(v))}
-              style={styles.picker}
-            >
+            <Picker selectedValue={year} onValueChange={(v) => setYear(Number(v))} style={styles.picker}>
               {[2024, 2025, 2026].map((y) => (
                 <Picker.Item key={y} label={String(y)} value={y} />
               ))}
@@ -134,37 +244,36 @@ export default function LaporanScreen() {
           Menampilkan: {MONTHS[month]} {year}
         </Text>
 
-        {/* Tabel */}
+        <View style={styles.infoBox}>
+          <Text style={styles.infoText}>API: {API_BASE_URL}</Text>
+          <Text style={styles.infoText}>Data: {rows.length} baris</Text>
+        </View>
+
         {loading ? (
           <View style={styles.loadingContainer}>
             <ActivityIndicator size="large" color="#42909b" />
             <Text style={styles.loadingText}>Memuat data...</Text>
           </View>
-        ) : error ? (
+        ) : error && rows.length === 0 ? (
           <View style={styles.errorContainer}>
             <Text style={styles.errorText}>{error}</Text>
-            <TouchableOpacity 
-              onPress={fetchPresensi}
-              style={styles.retryButton}
-            >
+            <TouchableOpacity onPress={fetchPresensi} style={styles.retryButton}>
               <Text style={styles.retryText}>Coba Lagi</Text>
             </TouchableOpacity>
           </View>
         ) : (
           <View style={styles.table}>
             <View style={styles.tableHead}>
-              <Text style={[styles.cell, styles.head, styles.cellDate]}>
-                Tanggal
-              </Text>
+              <Text style={[styles.cell, styles.head, styles.cellDate]}>Tanggal</Text>
               <Text style={[styles.cell, styles.head]}>Datang</Text>
               <Text style={[styles.cell, styles.head]}>Pulang</Text>
             </View>
 
             {rows.length > 0 ? (
-              rows.map((row) => (
-                <View key={row.tanggal} style={styles.tableRow}>
+              rows.map((row, index) => (
+                <View key={`${row.tanggal}-${index}`} style={[styles.tableRow, row.isIjin && styles.tableRowIjin]}>
                   <Text style={[styles.cell, styles.cellDate]}>{row.tanggal}</Text>
-                  <Text style={styles.cell}>{row.datang}</Text>
+                  <Text style={[styles.cell, row.isIjin && styles.cellIjin]}>{row.datang}</Text>
                   <Text style={styles.cell}>{row.pulang}</Text>
                 </View>
               ))
@@ -181,10 +290,7 @@ export default function LaporanScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#f5f5f5",
-  },
+  container: { flex: 1, backgroundColor: "#f5f5f5" },
   header: {
     flexDirection: "row",
     alignItems: "center",
@@ -192,44 +298,22 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     paddingHorizontal: 16,
     elevation: 4,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
   },
-  backButton: {
-    width: 40,
-    height: 40,
-    alignItems: "center",
-    justifyContent: "center",
-    marginRight: 8,
-  },
-  backIcon: {
-    fontSize: 24,
-    color: "#fff",
-    fontWeight: "600",
-  },
-  headerTitle: {
-    fontSize: 20,
-    fontWeight: "700",
-    color: "#fff",
-  },
-  content: {
-    padding: 16,
-  },
-  caption: {
-    marginTop: 8,
+  backButton: { width: 40, height: 40, alignItems: "center", justifyContent: "center", marginRight: 8 },
+  backIcon: { fontSize: 24, color: "#fff", fontWeight: "600" },
+  headerTitle: { fontSize: 20, fontWeight: "700", color: "#fff" },
+  content: { padding: 16 },
+  caption: { marginTop: 8, marginBottom: 12, color: "#666", fontSize: 14, fontWeight: "500" },
+  infoBox: {
+    backgroundColor: "#e3f2fd",
+    padding: 12,
+    borderRadius: 8,
     marginBottom: 16,
-    color: "#666",
-    fontSize: 14,
-    fontWeight: "500",
+    borderLeftWidth: 4,
+    borderLeftColor: "#42909b",
   },
-  dropdownRow: {
-    flexDirection: "row",
-    gap: 10,
-    marginBottom: 8,
-    maxWidth: 400,
-  },
+  infoText: { fontSize: 12, color: "#555", marginVertical: 2 },
+  dropdownRow: { flexDirection: "row", gap: 10, marginBottom: 8, maxWidth: 400 },
   dropdownBox: {
     flex: 1,
     borderWidth: 1,
@@ -239,36 +323,12 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     paddingTop: 18,
     elevation: 2,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
     height: 60,
   },
-  dropdownLabel: {
-    position: "absolute",
-    top: 6,
-    left: 10,
-    fontSize: 10,
-    color: "#42909b",
-    zIndex: 1,
-    backgroundColor: "#fff",
-    paddingHorizontal: 3,
-    fontWeight: "600",
-  },
-  picker: {
-    height: 42,
-  },
-  loadingContainer: {
-    paddingVertical: 60,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  loadingText: {
-    marginTop: 12,
-    color: "#666",
-    fontSize: 14,
-  },
+  dropdownLabel: { position: "absolute", top: 6, left: 10, fontSize: 10, color: "#42909b", fontWeight: "600" },
+  picker: { height: 42 },
+  loadingContainer: { paddingVertical: 60, alignItems: "center", justifyContent: "center" },
+  loadingText: { marginTop: 12, color: "#666", fontSize: 14 },
   errorContainer: {
     paddingVertical: 40,
     alignItems: "center",
@@ -277,39 +337,16 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#ddd",
   },
-  errorText: {
-    color: "#d32f2f",
-    fontSize: 14,
-    marginBottom: 16,
-  },
-  retryButton: {
-    backgroundColor: "#42909b",
-    paddingHorizontal: 24,
-    paddingVertical: 10,
-    borderRadius: 8,
-  },
-  retryText: {
-    color: "#fff",
-    fontSize: 14,
-    fontWeight: "600",
-  },
+  errorText: { color: "#d32f2f", fontSize: 14, marginBottom: 16, textAlign: "center", paddingHorizontal: 20 },
+  retryButton: { backgroundColor: "#42909b", paddingHorizontal: 24, paddingVertical: 10, borderRadius: 8 },
+  retryText: { color: "#fff", fontSize: 14, fontWeight: "600" },
   table: {
     borderWidth: 1,
     borderColor: "#ddd",
     borderRadius: 12,
-    overflow: "hidden",
     backgroundColor: "#fff",
-    elevation: 2,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 3,
   },
-  tableHead: {
-    flexDirection: "row",
-    backgroundColor: "#42909b",
-    paddingVertical: 14,
-  },
+  tableHead: { flexDirection: "row", backgroundColor: "#42909b", paddingVertical: 14 },
   tableRow: {
     flexDirection: "row",
     backgroundColor: "#fff",
@@ -318,26 +355,11 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderColor: "#f0f0f0",
   },
-  cell: {
-    flex: 1,
-    textAlign: "center",
-    fontSize: 14,
-    color: "#333",
-  },
-  cellDate: {
-    flex: 1.5,
-  },
-  head: {
-    fontWeight: "700",
-    color: "#fff",
-    fontSize: 14,
-  },
-  emptyRow: {
-    paddingVertical: 40,
-    alignItems: "center",
-  },
-  emptyText: {
-    color: "#999",
-    fontSize: 14,
-  },
+  tableRowIjin: { backgroundColor: "#fff9e6" },
+  cell: { flex: 1, textAlign: "center", fontSize: 14, color: "#333" },
+  cellDate: { flex: 1.5 },
+  cellIjin: { fontWeight: "600", color: "#f57c00" },
+  head: { fontWeight: "700", color: "#fff", fontSize: 14 },
+  emptyRow: { paddingVertical: 40, alignItems: "center" },
+  emptyText: { color: "#999", fontSize: 14 },
 });
