@@ -15,17 +15,43 @@ const C = {
   sub: "#6b7280",
   pill: "#f3f4f6",
   border: "#e5e7eb",
-  brand: "#42909b",      // header brand color
+  brand: "#42909b",
   brandDim: "#a9d5db",
   danger: "#ef4444",
 } as const;
 
+// ⚙️ Pastikan ENV ini TANPA /api di belakang, contoh: http://192.168.1.123:8000
 const ENV_BASE = process.env.EXPO_PUBLIC_API_BASE;
 const DEFAULT_BASE =
   Platform.OS === "android" ? "http://10.0.2.2:8000" : "http://localhost:8000";
-const API_BASE = ENV_BASE || DEFAULT_BASE;
+const API_BASE = (ENV_BASE || DEFAULT_BASE).replace(/\/+$/, ""); // hapus trailing slash
+
+const ENDPOINTS = {
+  login: `${API_BASE}/api/login`,
+  register: `${API_BASE}/api/register`,
+};
 
 type Role = "siswa" | "guru";
+
+// ⏱️ helper fetch dengan timeout + guard JSON
+async function fetchJson(input: RequestInfo, init?: RequestInit, timeoutMs = 12000) {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(input, { ...init, signal: controller.signal });
+    const raw = await res.text();
+    let json: any = null;
+    try { json = raw ? JSON.parse(raw) : null; } catch {
+      throw new Error(`Format respons server tidak valid.\n${raw?.slice(0, 200) || ""}`);
+    }
+    return { res, json };
+  } catch (e: any) {
+    if (e?.name === "AbortError") throw new Error("Koneksi lambat atau tidak stabil (timeout).");
+    throw e;
+  } finally {
+    clearTimeout(id);
+  }
+}
 
 export default function LoginRegisterScreen() {
   const [showRegModal, setShowRegModal] = useState(false);
@@ -46,14 +72,15 @@ export default function LoginRegisterScreen() {
   const [rImei, setRImei] = useState("");
   const [loadingReg, setLoadingReg] = useState(false);
 
-  // Prefill device ID
+  // Prefill device ID (stabil: androidId & iOS vendor ID)
   useEffect(() => {
     (async () => {
       try {
         let stored = (await AsyncStorage.getItem("device.id")) ?? "";
         if (!stored) {
-          if (Platform.OS === "android" && Application.getAndroidId) {
-            stored = (await Application.getAndroidId()) ?? "";
+          if (Platform.OS === "android") {
+            // Expo Application.androidId (nullable)
+            stored = (Application as any).androidId ?? "";
           } else if (Platform.OS === "ios" && (Application as any).getIosIdForVendorAsync) {
             stored = (await (Application as any).getIosIdForVendorAsync()) ?? "";
           }
@@ -73,7 +100,11 @@ export default function LoginRegisterScreen() {
   );
 
   const registerValid = useMemo(
-    () => rUsername.trim() !== "" && rPassword.trim().length >= 6 && rUnitId.trim() !== "" && rImei.trim() !== "",
+    () =>
+      rUsername.trim() !== "" &&
+      rPassword.trim().length >= 6 &&
+      rUnitId.trim() !== "" &&
+      rImei.trim() !== "",
     [rUsername, rPassword, rUnitId, rImei]
   );
 
@@ -86,8 +117,12 @@ export default function LoginRegisterScreen() {
     const displayName = user?.nama ?? user?.username ?? "Pengguna";
     const unitLabel = user?.unit_name ?? user?.unit ?? String(user?.unit_id ?? "");
     const userObj = {
-      id: user?.id, username: user?.username, role: user?.role,
-      unit_id: user?.unit_id, nama: displayName, unit: unitLabel
+      id: user?.id,
+      username: user?.username,
+      role: user?.role,
+      unit_id: user?.unit_id,
+      nama: displayName,
+      unit: unitLabel,
     };
 
     await AsyncStorage.multiSet([
@@ -95,6 +130,7 @@ export default function LoginRegisterScreen() {
       ["auth.tokenType", tokenType],
       ["auth.user", JSON.stringify(userObj)],
       ["auth.beranda", [displayName, unitLabel].filter(Boolean).join(" • ")],
+      ["app.apiBase", API_BASE], // simpan base untuk screen lain
     ]);
     router.push("/tabs");
   };
@@ -108,21 +144,25 @@ export default function LoginRegisterScreen() {
     setLoadingLogin(true);
     setErrLogin(null);
     try {
-      const res = await fetch(`${API_BASE}/api/login`, {
+      const { res, json } = await fetchJson(ENDPOINTS.login, {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
         body: JSON.stringify({ username: username.trim(), password, imei }),
       });
-      const raw = await res.text();
-      let json: any = null;
-      try { json = JSON.parse(raw); } catch { throw new Error("Format respons server tidak valid."); }
+
       if (!res.ok || json?.status !== "success") {
-        throw new Error(json?.message || `Login gagal (HTTP ${res.status})`);
+        const msg =
+          json?.message ||
+          (res.status === 401
+            ? "Kredensial salah atau perangkat tidak terdaftar."
+            : `Login gagal (HTTP ${res.status})`);
+        throw new Error(msg);
       }
       await persistAndGo(json);
     } catch (e: any) {
-      setErrLogin(e?.message || "Terjadi kesalahan saat login.");
-      Alert.alert("Login gagal", e?.message || "Terjadi kesalahan saat login.");
+      const msg = e?.message || "Terjadi kesalahan saat login.";
+      setErrLogin(msg);
+      Alert.alert("Login gagal", msg);
     } finally {
       setLoadingLogin(false);
     }
@@ -135,7 +175,7 @@ export default function LoginRegisterScreen() {
     }
     try {
       setLoadingReg(true);
-      const res = await fetch(`${API_BASE}/api/register`, {
+      const { res, json } = await fetchJson(ENDPOINTS.register, {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
         body: JSON.stringify({
@@ -146,24 +186,26 @@ export default function LoginRegisterScreen() {
           unit_id: Number(rUnitId),
         }),
       });
+
       if (!res.ok) {
         if (res.status === 422) {
-          const data = await res.json();
-          const msgs = data?.errors ? Object.values<string[]>(data.errors).flat() : [data?.message || "Validasi gagal"];
+          const msgs = json?.errors
+            ? Object.values<string[]>(json.errors).flat()
+            : [json?.message || "Validasi gagal"];
           Alert.alert("Gagal", msgs.join("\n"));
         } else {
-          const t = await res.text();
-          Alert.alert("Error", `Status ${res.status}: ${t}`);
+          Alert.alert("Error", `Status ${res.status}: ${JSON.stringify(json)}`);
         }
         return;
       }
-      const data = await res.json();
-      if (data?.access_token && data?.user) {
-        Alert.alert("Berhasil", data?.message ?? "Registrasi sukses 🎉");
-        await persistAndGo(data);
+
+      if (json?.access_token && json?.user) {
+        Alert.alert("Berhasil", json?.message ?? "Registrasi sukses 🎉");
+        await persistAndGo(json);
         return;
       }
-      Alert.alert("Berhasil", data?.message ?? "Registrasi sukses. Silakan login.");
+
+      Alert.alert("Berhasil", json?.message ?? "Registrasi sukses. Silakan login.");
       setShowRegModal(false);
       setUsername(rUsername);
       setPassword(rPassword);
@@ -177,13 +219,9 @@ export default function LoginRegisterScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: C.bg }}>
-      {/* ===== Header kustom: warna brand + tombol back kotak ===== */}
+      {/* Header brand + back kotak */}
       <View style={s.header}>
-        <TouchableOpacity
-          onPress={() => router.back()}
-          style={s.backBox}
-          activeOpacity={0.7}
-        >
+        <TouchableOpacity onPress={() => router.back()} style={s.backBox} activeOpacity={0.7}>
           <Ionicons
             name={Platform.OS === "ios" ? "chevron-back" : "arrow-back"}
             size={18}
@@ -199,6 +237,8 @@ export default function LoginRegisterScreen() {
           <View style={s.hero}>
             <Text style={s.appTitle}>SIMATA</Text>
             <Text style={s.appSubtitle}>Sistem Informasi Permata</Text>
+            {/* Debug kecil untuk cek base saat dev */}
+            <Text style={{ color: C.sub, fontSize: 11, marginTop: 6 }}>API: {API_BASE}</Text>
           </View>
 
           <View style={s.form}>
@@ -236,7 +276,7 @@ export default function LoginRegisterScreen() {
                 style={s.input}
                 value={imei}
                 onChangeText={setImei}
-                placeholder="IMEI / ANDROID_ID"
+                placeholder="IMEI / Device ID"
                 placeholderTextColor={C.sub}
               />
             </View>
@@ -293,35 +333,81 @@ export default function LoginRegisterScreen() {
   );
 }
 
-function RegisterForm({ rUsername, setRUsername, rPassword, setRPassword, rRole, setRRole, rUnitId, setRUnitId, rImei, setRImei, loadingReg, registerValid, onSubmit, onBackToLogin }: any) {
+function RegisterForm({
+  rUsername, setRUsername,
+  rPassword, setRPassword,
+  rRole, setRRole,
+  rUnitId, setRUnitId,
+  rImei, setRImei,
+  loadingReg, registerValid,
+  onSubmit, onBackToLogin
+}: any) {
   return (
     <View style={s.form}>
       <Text style={s.label}>Username</Text>
-      <TextInput style={s.inputBox} value={rUsername} onChangeText={setRUsername} autoCapitalize="none" placeholder="username unik" placeholderTextColor={C.sub} />
+      <TextInput
+        style={s.inputBox}
+        value={rUsername}
+        onChangeText={setRUsername}
+        autoCapitalize="none"
+        placeholder="username unik"
+        placeholderTextColor={C.sub}
+      />
 
       <Text style={s.label}>Password (min 6)</Text>
-      <TextInput style={s.inputBox} value={rPassword} onChangeText={setRPassword} secureTextEntry placeholder="••••••" placeholderTextColor={C.sub} />
+      <TextInput
+        style={s.inputBox}
+        value={rPassword}
+        onChangeText={setRPassword}
+        secureTextEntry
+        placeholder="••••••"
+        placeholderTextColor={C.sub}
+      />
 
       <Text style={s.label}>Role</Text>
       <View style={s.segment}>
-        <TouchableOpacity style={[s.segmentBtn, rRole === "siswa" && s.segmentBtnActive]} onPress={() => setRRole("siswa")}>
+        <TouchableOpacity
+          style={[s.segmentBtn, rRole === "siswa" && s.segmentBtnActive]}
+          onPress={() => setRRole("siswa")}
+        >
           <Text style={[s.segmentText, rRole === "siswa" && s.segmentTextActive]}>Siswa</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={[s.segmentBtn, rRole === "guru" && s.segmentBtnActive]} onPress={() => setRRole("guru")}>
+        <TouchableOpacity
+          style={[s.segmentBtn, rRole === "guru" && s.segmentBtnActive]}
+          onPress={() => setRRole("guru")}
+        >
           <Text style={[s.segmentText, rRole === "guru" && s.segmentTextActive]}>Guru</Text>
         </TouchableOpacity>
       </View>
 
       <Text style={s.label}>Unit ID</Text>
-      <TextInput style={s.inputBox} value={rUnitId} onChangeText={setRUnitId} keyboardType="number-pad" placeholder="contoh: 1" placeholderTextColor={C.sub} />
+      <TextInput
+        style={s.inputBox}
+        value={rUnitId}
+        onChangeText={setRUnitId}
+        keyboardType="number-pad"
+        placeholder="contoh: 1"
+        placeholderTextColor={C.sub}
+      />
 
       <Text style={s.label}>Device Identifier (IMEI)</Text>
       <View style={s.pill}>
         <Ionicons name="phone-portrait-outline" size={18} color={C.sub} style={s.icon} />
-        <TextInput style={s.input} value={rImei} onChangeText={setRImei} placeholder="otomatis terisi — bisa edit" placeholderTextColor={C.sub} />
+        <TextInput
+          style={s.input}
+          value={rImei}
+          onChangeText={setRImei}
+          placeholder="otomatis terisi — bisa edit"
+          placeholderTextColor={C.sub}
+        />
       </View>
 
-      <TouchableOpacity onPress={onSubmit} activeOpacity={0.9} style={[s.primaryBtn, (!registerValid || loadingReg) && { backgroundColor: C.brandDim }]} disabled={!registerValid || loadingReg}>
+      <TouchableOpacity
+        onPress={onSubmit}
+        activeOpacity={0.9}
+        style={[s.primaryBtn, (!registerValid || loadingReg) && { backgroundColor: C.brandDim }]}
+        disabled={!registerValid || loadingReg}
+      >
         {loadingReg ? <ActivityIndicator color="#fff" /> : <Text style={s.primaryText}>Daftar</Text>}
       </TouchableOpacity>
 
@@ -348,7 +434,7 @@ const s = StyleSheet.create({
   backBox: {
     width: 40,
     height: 32,
-    borderRadius: 6,           // ← kotak (bukan bulat)
+    borderRadius: 6,
     backgroundColor: "#e7f1f3",
     alignItems: "center",
     justifyContent: "center",
@@ -382,6 +468,6 @@ const s = StyleSheet.create({
 
   // Modal
   modalHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderColor: C.border, backgroundColor: "#fff" },
-  modalClose: { width: 40, height: 40, borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: C.pill }, // kotak rounded
+  modalClose: { width: 40, height: 40, borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: C.pill },
   modalTitle: { fontSize: 16, fontWeight: "800", color: C.text },
 });

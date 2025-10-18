@@ -1,6 +1,6 @@
 // app/index.tsx
 import { Entypo, Feather, Ionicons, MaterialIcons } from "@expo/vector-icons";
-import { Link, type Href, router } from "expo-router"; 
+import { Link, type Href, router } from "expo-router";
 import React, { useEffect, useMemo, useState } from "react";
 import {
   FlatList,
@@ -36,7 +36,7 @@ const SHADOW = Platform.select({
 
 // ====== PRAYER API (MyQuran) CONFIG ======
 const MYQURAN_BASE = "https://api.myquran.com/v2/sholat";
-const CITY_KEYWORD = "Mojokerto";
+const CITY_KEYWORD = "Kota Mojokerto";
 
 type Item = {
   label: string;
@@ -60,6 +60,43 @@ const ITEMS: Item[] = [
   { label: "Login",      icon: "log-in-outline",         lib: "ion", href: "/login" },
 ];
 
+// === RBAC: role & izin ===
+type Role = "admin" | "tu" | "kanit" | "guru" | "siswa" | "guest";
+
+function normalizeRole(r: any): Role {
+  const s = String(r ?? "guest").trim().toLowerCase();
+  if (s === "admin") return "admin";
+  if (s === "tu" || s === "tata usaha" || s === "staff tu") return "tu";
+  // alias umum yang sering tertukar: kabit/kabid = kanit
+  if (s === "kanit" || s === "kabit" || s === "kabid" || s === "kepala unit" || s === "kepala bidang") return "kanit";
+  if (s === "guru" || s === "teacher") return "guru";
+  if (s === "siswa" || s === "murid" || s === "student") return "siswa";
+  return "guest";
+}
+
+// Cek apakah role boleh melihat label menu tertentu
+function canSee(label: string, role: Role) {
+  // admin & guru: semua menu, sembunyikan "Login"
+  if (role === "admin" || role === "guru") return label !== "Login";
+
+  if (role === "tu") {
+    return ["Kalender Pendidikan", "Inventaris", "Laporan"].includes(label);
+  }
+
+  if (role === "siswa") {
+    return ["PPDB", "Doa Harian", "Video", "Al-Qur'an", "Berita", "Siswa"].includes(label);
+  }
+
+  if (role === "kanit") {
+    // Belum ada daftar dari kamu; sementara tidak menampilkan menu apa pun.
+    // Ubah return berikut jika nanti ingin memberi akses:
+    return false;
+  }
+
+  // guest: hanya Login
+  return label === "Login";
+}
+
 // ====== Icon switcher ======
 function IconSwitch({ name, lib, size = 26, color = COLORS.text }: { name: string; lib?: Item["lib"]; size?: number; color?: string }) {
   if (lib === "mi")  return <MaterialIcons name={name as any} size={size} color={color} />;
@@ -68,7 +105,7 @@ function IconSwitch({ name, lib, size = 26, color = COLORS.text }: { name: strin
   return <Ionicons name={name as any} size={size} color={color} />;
 }
 
-// ====== Header clock (kode lama tetap) ======
+// ====== Header clock ======
 function HeaderClock() {
   const [now, setNow] = useState<Date>(new Date());
   useEffect(() => {
@@ -110,11 +147,17 @@ function HeaderClock() {
   );
 }
 
-// ====== Tombol Logout kecil pojok kanan atas ======
+// ====== Tombol Logout ======
 function LogoutButton() {
   const handleLogout = async () => {
     try {
-      await AsyncStorage.multiRemove(["auth.user", "auth.token"]);
+      await AsyncStorage.multiRemove([
+        "auth.user",
+        "auth.token",
+        "auth.tokenType",
+        "auth.beranda",
+        "app.apiBase",
+      ]);
       router.replace("/login");
     } catch (error) {
       Alert.alert("Error", "Gagal logout. Silakan coba lagi.");
@@ -127,7 +170,7 @@ function LogoutButton() {
       style={{
         position: "absolute",
         top: 18,
-        right: 16,  // ✅ dipindah ke kanan
+        right: 16,
         backgroundColor: COLORS.brand,
         borderRadius: 20,
         padding: 6,
@@ -138,7 +181,7 @@ function LogoutButton() {
   );
 }
 
-// ====== Shortcut card (tetap) ======
+// ====== Shortcut card ======
 function ShortcutCard({ title, subtitle, icon, href }: { title: string; subtitle: string; icon: React.ReactNode; href: Href }) {
   const Card = (
     <View style={[styles.shortcutCard, SHADOW]}>
@@ -157,7 +200,7 @@ function ShortcutCard({ title, subtitle, icon, href }: { title: string; subtitle
   );
 }
 
-// ====== PRAYER HOOK (tetap) ======
+// ====== PRAYER HOOK ======
 type PrayerRow = { name: string; time: string };
 function pad2(n: number) { return String(n).padStart(2, "0"); }
 function usePrayers(cityKeyword: string) {
@@ -227,27 +270,105 @@ function usePrayers(cityKeyword: string) {
   return { prayers, loading, error, cityLabel };
 }
 
+/** =======================
+ *  Helper: Resolve unit name dari API jika yang ada hanya unit_id
+ *  Perbaikan TypeScript: headers dibuat sebagai Record<string,string>
+ *  ======================= */
+async function resolveUnitName(): Promise<string | null> {
+  try {
+    const [rawUser, base, token, tokenType] = await Promise.all([
+      AsyncStorage.getItem("auth.user"),
+      AsyncStorage.getItem("app.apiBase"),
+      AsyncStorage.getItem("auth.token"),
+      AsyncStorage.getItem("auth.tokenType"),
+    ]);
+    if (!rawUser || !base) return null;
+
+    const u = JSON.parse(rawUser || "{}");
+    const unitId = u?.unit_id;
+    if (unitId == null) return null;
+
+    const API_BASE = (base || "").replace(/\/+$/, "");
+    const headers: Record<string, string> = { Accept: "application/json" };
+    if (token && tokenType) headers["Authorization"] = `${tokenType} ${token}`;
+
+    const candidates = [
+      `${API_BASE}/api/units/${unitId}`,
+      `${API_BASE}/api/unit/${unitId}`,
+    ];
+
+    for (const url of candidates) {
+      try {
+        const r = await fetch(url, { headers });
+        if (!r.ok) continue;
+        const j = await r.json();
+        const name =
+          (j as any)?.nama_unit ??
+          (j as any)?.data?.nama_unit ??
+          (j as any)?.unit?.nama_unit ??
+          (j as any)?.nama ??
+          null;
+        if (typeof name === "string" && name.trim()) return name.trim();
+      } catch {}
+    }
+  } catch {}
+  return null;
+}
+
 // ====== BERANDA ======
 export default function Beranda() {
   const { width } = useWindowDimensions();
   const numColumns = width < 400 ? 3 : width < 768 ? 4 : 6;
   const { prayers, loading: prayerLoading, error: prayerError, cityLabel } = usePrayers(CITY_KEYWORD);
   const [welcome, setWelcome] = useState<string>("");
+  const [role, setRole] = useState<Role>("guest");
+
+  // ⬇️ Baca user → build label → jika masih angka, resolve dari API → cache ulang + set role
   useEffect(() => {
     const loadWelcome = async () => {
-      const s = await AsyncStorage.getItem("auth.beranda");
-      if (s && s.trim()) { setWelcome(s.trim()); return; }
-      const rawUser = await AsyncStorage.getItem("auth.user");
-      if (rawUser) {
-        try {
+      try {
+        const rawUser = await AsyncStorage.getItem("auth.user");
+        if (rawUser) {
           const u = JSON.parse(rawUser);
-          const pieces = [u?.nama, u?.unit].filter(Boolean);
-          if (pieces.length > 0) setWelcome(pieces.join(" • "));
-        } catch {}
+          setRole(normalizeRole(u?.role)); // <-- ambil role dari cache login
+
+          const displayName = u?.nama ?? u?.username ?? "Pengguna";
+          let unitLabel =
+            u?.unit ?? u?.unit_name ?? (u?.unit_id != null ? String(u.unit_id) : "");
+
+          // Jika masih angka murni → resolve dari API lalu update cache
+          if (unitLabel && /^\d+$/.test(String(unitLabel))) {
+            const resolved = await resolveUnitName();
+            if (resolved) {
+              unitLabel = resolved;
+              const updated = { ...u, unit: resolved, unit_name: resolved };
+              await AsyncStorage.setItem("auth.user", JSON.stringify(updated));
+            }
+          }
+
+          const fresh = [displayName, unitLabel].filter(Boolean).join(" • ");
+          setWelcome(fresh);
+          await AsyncStorage.setItem("auth.beranda", fresh);
+          return;
+        }
+
+        // fallback terakhir: pakai cache lama bila ada
+        const s = await AsyncStorage.getItem("auth.beranda");
+        if (s && s.trim()) setWelcome(s.trim());
+        setRole("guest");
+      } catch {
+        const s = await AsyncStorage.getItem("auth.beranda");
+        if (s && s.trim()) setWelcome(s.trim());
+        setRole("guest");
       }
     };
     loadWelcome();
   }, []);
+
+  const visibleItems = useMemo(
+    () => ITEMS.filter((it) => canSee(it.label, role)),
+    [role]
+  );
 
   const renderItem = ({ item }: ListRenderItemInfo<Item>) => {
     const Card = (
@@ -268,7 +389,7 @@ export default function Beranda() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: COLORS.bg }}>
       <HeaderClock />
-      <LogoutButton />   {/* ✅ Logout kecil pojok kanan atas */}
+      <LogoutButton />
 
       {welcome ? (
         <View style={[styles.welcomeWrap, SHADOW]}>
@@ -304,7 +425,7 @@ export default function Beranda() {
       <Text style={styles.gridHeading}>Menu Utama</Text>
       <FlatList
         key={numColumns}
-        data={ITEMS}
+        data={visibleItems}
         keyExtractor={(it) => it.label}
         renderItem={renderItem}
         numColumns={numColumns}
@@ -314,18 +435,23 @@ export default function Beranda() {
           <View style={{ marginTop: 12, marginBottom: 120 }}>
             <Text style={styles.gridHeading}>Shortcut</Text>
             <View style={styles.shortcutsWrap}>
-              <ShortcutCard
-                title="Berita"
-                subtitle="Tekan untuk melihat semua berita"
-                href={"/tabs/berita"}
-                icon={<Ionicons name="newspaper" size={22} color={COLORS.brand} />}
-              />
-              <ShortcutCard
-                title="Doa Harian"
-                subtitle="Tekan untuk melihat daftar doa"
-                href={"/doa"}
-                icon={<Ionicons name="book" size={22} color={COLORS.brand} />}
-              />
+              {/* Shortcut juga ikut aturan role */}
+              {canSee("Berita", role) && (
+                <ShortcutCard
+                  title="Berita"
+                  subtitle="Tekan untuk melihat semua berita"
+                  href={"/tabs/berita"}
+                  icon={<Ionicons name="newspaper" size={22} color={COLORS.brand} />}
+                />
+              )}
+              {canSee("Doa Harian", role) && (
+                <ShortcutCard
+                  title="Doa Harian"
+                  subtitle="Tekan untuk melihat daftar doa"
+                  href={"/doa"}
+                  icon={<Ionicons name="book" size={22} color={COLORS.brand} />}
+                />
+              )}
             </View>
           </View>
         }
@@ -343,7 +469,7 @@ const styles = StyleSheet.create({
   clockText: { fontSize: 16, fontWeight: "700", color: "#ffffff" },
   dateText: { marginTop: 2, fontSize: 13, color: "#f3f4f6", fontWeight: "600" },
 
-  // NEW: WELCOME
+  // WELCOME
   welcomeWrap: { marginTop: -10, marginHorizontal: 12, marginBottom: 8, paddingVertical: 10, paddingHorizontal: 12, backgroundColor: "#ffffff", borderRadius: 14, borderWidth: 1, borderColor: COLORS.border, flexDirection: "row", alignItems: "center", gap: 8 },
   welcomeText: { fontSize: 13, color: COLORS.text, fontWeight: "700", flex: 1 },
 
