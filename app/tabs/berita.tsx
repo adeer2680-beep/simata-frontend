@@ -15,7 +15,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { router, Stack, useFocusEffect } from "expo-router";
 
 // URL berita
-const NEWS_URL = "https://yayasansitpermata.blogspot.com/p/tentang-kami.html";
+const NEWS_URL = "https://sitpermata.id/";
 
 // Import WebView hanya di native (Android/iOS)
 let WebViewComp: any = null;

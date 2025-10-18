@@ -15,7 +15,7 @@ import {
 } from "react-native";
 
 // ==== Config API ====
-const API_BASE_URL = "http://localhost:8000/api";
+const API_BASE_URL = "http://http://10.29.82.182/aplikasi_simata/public/api";
 
 // ==== Types ====
 type YTVideo = {

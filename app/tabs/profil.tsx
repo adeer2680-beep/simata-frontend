@@ -29,7 +29,7 @@ const AVATAR_SIZE = 104;
 
 // Fallback base URL bila app.apiBase belum ada di storage
 const DEFAULT_BASE_URL =
-  Platform.OS === "android" ? "http://172.31.129.242:8000" : "http://localhost:8000";
+  Platform.OS === "android" ? "http://10.29.82.182/aplikasi_simata/public" : "http://localhost:8000";
 
 export default function ProfilScreen() {
   const [apiBase, setApiBase] = useState(DEFAULT_BASE_URL);

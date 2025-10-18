@@ -21,7 +21,7 @@ const HOST =
     ? (USE_ANDROID_EMULATOR ? "10.0.2.2" : LAN_IP)
     : LAN_IP;
 
-const API_BASE = `http://localhost:8000/api`;
+const API_BASE = `http://10.29.82.182/aplikasi_simata/public/api`;
 const IJIN_URL = `${API_BASE}/ijins`;
 
 const C = {

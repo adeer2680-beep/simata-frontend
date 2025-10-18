@@ -10,7 +10,7 @@ import { WebView } from "react-native-webview";
 // 👉 GANTI INI dengan alamat backend Laravel kamu
 const INVENTARIS_URL =
   Platform.OS === "android"
-    ? "http://10.0.2.2:8000/inventaris" // emulator Android
+    ? "http://10.29.82.182/aplikasi_simata/public/api" // emulator Android
     : "http://localhost:8000/inventaris"; // dev lokal
 // contoh online: "https://inventaris.sitpermata.id/inventaris"
 

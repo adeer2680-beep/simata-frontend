@@ -92,7 +92,7 @@ function parseAsDateAtLocalMidnight(isoDate: string | null): Date | null {
 
 // ============ API CONFIG ============
 const API_BASE =
-  Platform.OS === "android" ? "http://10.0.2.2:8000/api" : "http://localhost:8000/api";
+  Platform.OS === "android" ? "http://10.29.82.182/aplikasi_simata/public/api" : "http://localhost:8000/api";
 
 const KALENDER_URL = `${API_BASE}/kalender-akademik`;
 

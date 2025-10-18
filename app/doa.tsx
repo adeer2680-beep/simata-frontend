@@ -32,7 +32,7 @@ type DoaItem = {
 };
 
 const API_BASE =
-  Platform.OS === "android" ? "http://10.0.2.2:8000/api" : "http://localhost:8000/api";
+  Platform.OS === "android" ? "http://10.29.82.182/aplikasi_simata/public/api" : "http://localhost:8000/api";
 
 const API_LIST = `${API_BASE}/doa`; // GET daftar doa
 

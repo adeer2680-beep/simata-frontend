@@ -23,7 +23,7 @@ const C = {
 // ⚙️ Pastikan ENV ini TANPA /api di belakang, contoh: http://192.168.1.123:8000
 const ENV_BASE = process.env.EXPO_PUBLIC_API_BASE;
 const DEFAULT_BASE =
-  Platform.OS === "android" ? "http://10.0.2.2:8000" : "http://localhost:8000";
+  Platform.OS === "android" ? "http://10.29.82.182/aplikasi_simata/public" : "http://localhost:8000";
 const API_BASE = (ENV_BASE || DEFAULT_BASE).replace(/\/+$/, ""); // hapus trailing slash
 
 const ENDPOINTS = {
